@@ -26,7 +26,9 @@
 - OpenAI-compatible base URL по умолчанию: `http://localhost:8080/v1`.
 - Reranker: `BAAI/bge-reranker-v2-m3`, включается при наличии ресурсов.
 - Основной формат сдачи: Jupyter Notebook + модульный код в `src/`.
-- Docstring format для функций: Google style.
+- Формат docstrings для функций: Google style на русском языке.
+- Все комментарии, docstrings и описания функций в коде должны быть написаны на русском языке; английские имена переменных, функций, классов, импортов, моделей, API endpoints и технических параметров допускаются.
+- `Settings` в `src/config.py` должен быть сгруппирован по тематическим dataclass-блокам: `runtime`, `data`, `llm`, `judge`, `embedding`, `chroma`, `chunking`, `retrieval`, `reranker`, `generation`; плоский перегруженный список параметров и плоские alias-свойства верхнего уровня в одном классе не допускаются.
 
 ---
 
@@ -189,7 +191,7 @@ python -c "import langchain; import chromadb; import sentence_transformers; prin
 ### Критерии готовности
 
 - Структура соответствует `spec.md`.
-- Все функции в `src/` получают Google-style docstrings по мере реализации.
+- Все функции в `src/` получают Google-style docstrings на русском языке по мере реализации.
 - Notebook импортирует функции из `src/`, а не содержит всю логику внутри ячеек.
 
 ---
@@ -765,7 +767,8 @@ Gap-поведение: ...
 
 ### Проверить
 
-- Функции в `src/` имеют Google-style docstrings.
+- Функции в `src/` имеют Google-style docstrings на русском языке.
+- Комментарии, docstrings и описания функций в коде написаны на русском языке.
 - Нет захардкоженных путей, которые должны быть в `.env`.
 - Нет секретов в репозитории.
 - Нет больших локальных артефактов Chroma в git.
@@ -821,7 +824,7 @@ Gap-поведение: ...
 1. `[x]` Исправить комментарий в `.env.example`, если он всё ещё называет основной reranker альтернативным.
 2. `[x]` Обновить `requirements.txt` под LangChain + Chroma.
 3. `[x]` Создать `src/` и `notebooks/`.
-4. `[ ]` Реализовать `src/config.py` и загрузку `.env`.
+4. `[x]` Реализовать `src/config.py` и загрузку `.env`.
 5. `[ ]` Реализовать загрузку и первичный аудит `filmoskop_kb.json`.
 
 ## Журнал выполнения
@@ -943,3 +946,122 @@ Gap-поведение: ...
 **Следующий шаг:**
 
 - Реализовать `src/config.py` и загрузку `.env`.
+
+### 2026-11-19 — пункт «Реализовать `src/config.py` и загрузку `.env`»
+
+**Статус:** `[x]` завершено.
+
+**Изменённые файлы:**
+
+- `src/config.py`;
+- `PLAN.md`.
+
+**Что сделано:**
+
+- Проверены актуальные `spec.md`, `PLAN.md`, `.env.example`, `.gitignore`, `requirements.txt`, `src/config.py` и состояние рабочей директории.
+- В `src/config.py` добавлен immutable dataclass `Settings` со сгруппированными настройками из `.env.example`.
+- Реализована функция `load_settings()` для загрузки `.env` и парсинга настроек окружения.
+- Реализована функция `load_env_file()` с использованием `python-dotenv`, если пакет установлен.
+- Добавлен fallback-парсер простых `.env` файлов, чтобы базовые проверки `config.py` могли выполняться до установки зависимостей.
+- Относительные пути `DATASET_PATH` и `CHROMA_PERSIST_DIR` приводятся к путям относительно корня проекта.
+- Добавлены парсеры `str`, `int`, `float`, `bool`, `Path` с понятными ошибками для некорректных значений.
+- В списке ближайших задач текущий пункт отмечен как выполненный.
+
+**Проверки:**
+
+- `.\.venv\Scripts\python.exe --version` подтвердил целевую версию `Python 3.11.9`.
+- `.\.venv\Scripts\python.exe -m py_compile src/config.py` успешно проверил синтаксис `src/config.py`.
+- `.\.venv\Scripts\python.exe -c "from src.config import load_settings; ..."` успешно загрузил настройки из окружения/`.env` и вывел ожидаемые значения `dataset_path`, `llm_base_url`, `embedding_model_name`, `chroma_persist_dir`, `bm25_enabled`, `reranker_enabled`, `refusal_phrase`.
+- `.\.venv\Scripts\python.exe -c "import os; ... from src.config import _get_bool; ..."` подтвердил парсинг boolean-значений `yes -> True` и `0 -> False`.
+- `git --no-pager diff -- src/config.py PLAN.md` и `git --no-pager status --short` выполнены после изменений.
+
+**Ошибки и блокеры:**
+
+- Блокеров нет.
+- Зависимости проекта всё ещё могут быть не установлены в `.venv`; поэтому `src/config.py` не требует обязательного наличия `python-dotenv` на этапе базовой проверки и использует fallback-парсер.
+- Логика загрузки и аудита датасета не реализовывалась, так как это следующий пункт плана.
+- Git вывел предупреждение `LF will be replaced by CRLF the next time Git touches it` для `src/config.py`; это не блокирует выполнение и связано с настройками line endings в Windows-окружении.
+
+**Следующий шаг:**
+
+- Реализовать загрузку и первичный аудит `filmoskop_kb.json`.
+
+### 2026-11-19 — группировка настроек `Settings`
+
+**Статус:** `[x]` завершено.
+
+**Изменённые файлы:**
+
+- `spec.md`;
+- `PLAN.md`;
+- `src/config.py`.
+
+**Что сделано:**
+
+- В `src/config.py` плоский перегруженный `Settings` разделён на тематические immutable dataclass-блоки: `RuntimeSettings`, `DataSettings`, `LlmSettings`, `JudgeSettings`, `EmbeddingSettings`, `ChromaSettings`, `ChunkingSettings`, `RetrievalSettings`, `RerankerSettings`, `GenerationSettings`.
+- Основной доступ к настройкам теперь идёт через группы: `settings.data.dataset_path`, `settings.llm.base_url`, `settings.embedding.model_name`, `settings.retrieval.top_k`, `settings.generation.refusal_phrase`.
+- Плоские read-only properties совместимости верхнего уровня не добавляются: доступ к настройкам должен идти через тематические группы.
+- В `spec.md` добавлено требование не хранить все настройки плоским списком в `Settings`, а группировать их по тематическим dataclass-блокам.
+- В технической рамке `PLAN.md` зафиксировано такое же архитектурное требование.
+
+**Проверки:**
+
+- `Get-ChildItem src/*.py | ForEach-Object { .\.venv\Scripts\python.exe -m py_compile $_.FullName }` — проверка синтаксиса всех Python-модулей.
+- `.\.venv\Scripts\python.exe -c "from src.config import load_settings; ..."` — проверка загрузки вложенных настроек через тематические группы.
+- `git diff --check` — проверка diff на пробельные ошибки.
+- `git --no-pager status --short` — проверка состояния рабочей директории.
+
+**Ошибки и блокеры:**
+
+- Блокеров нет.
+- Предупреждение Git про будущую замену `LF` на `CRLF` в Windows-окружении остаётся не блокирующим.
+
+**Следующий шаг:**
+
+- Реализовать загрузку и первичный аудит `filmoskop_kb.json`.
+
+### 2026-11-19 — уточнение языка комментариев и docstrings
+
+**Статус:** `[x]` завершено.
+
+**Изменённые файлы:**
+
+- `spec.md`;
+- `PLAN.md`;
+- `src/__init__.py`;
+- `src/config.py`;
+- `src/data_loading.py`;
+- `src/cleaning.py`;
+- `src/chunking.py`;
+- `src/embeddings.py`;
+- `src/vector_store.py`;
+- `src/retrieval.py`;
+- `src/metrics.py`;
+- `src/generation.py`;
+- `src/judging.py`;
+- `src/diagnostics.py`.
+
+**Что сделано:**
+
+- В `spec.md` добавлено нефункциональное требование: все комментарии, docstrings и описания функций в коде должны быть на русском языке.
+- В `PLAN.md` уточнена техническая рамка и checklist финальной проверки: Google-style docstrings должны быть на русском языке.
+- В уже созданных модулях `src/` переведены module docstrings на русский язык.
+- В `src/config.py` переведены docstrings класса и функций на русский язык.
+- В `src/config.py` переведены сообщения `ValueError`, которые относятся к ошибкам парсинга настроек.
+- Поведение кода не изменялось.
+
+**Проверки:**
+
+- `Get-ChildItem src/*.py | ForEach-Object { .\.venv\Scripts\python.exe -m py_compile $_.FullName }` — проверка синтаксиса всех Python-модулей.
+- `.\.venv\Scripts\python.exe -c "from src.config import load_settings; ..."` — проверка загрузки настроек после перевода docstrings и сообщений ошибок.
+- Поиск по `src/` на оставшиеся английские docstrings, комментарии и стандартные англоязычные секции docstrings.
+- `git --no-pager diff -- spec.md PLAN.md src` и `git --no-pager status --short`.
+
+**Ошибки и блокеры:**
+
+- Блокеров нет.
+- Английские технические идентификаторы, имена моделей, переменные окружения, API endpoints и термины вроде `retrieval`, `embedding`, `reranker`, `fallback`, `dotenv` оставлены без перевода там, где это часть принятой терминологии проекта.
+
+**Следующий шаг:**
+
+- Реализовать загрузку и первичный аудит `filmoskop_kb.json`.

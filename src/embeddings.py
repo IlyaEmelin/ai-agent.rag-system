@@ -1,1 +1,1 @@
-"""Embedding model helpers for the RAG retrieval pipeline."""
+"""Вспомогательные функции embedding-модели для retrieval-пайплайна RAG."""

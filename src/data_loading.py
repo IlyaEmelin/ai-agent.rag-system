@@ -1,1 +1,1 @@
-"""Dataset loading utilities for the Filmoskop knowledge base."""
+"""Утилиты загрузки датасета базы знаний «Фильмоскоп»."""

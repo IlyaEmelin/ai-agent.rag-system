@@ -1,1 +1,1 @@
-"""Text cleaning and normalization utilities for the Filmoskop corpus."""
+"""Утилиты очистки и нормализации текстов корпуса «Фильмоскоп»."""

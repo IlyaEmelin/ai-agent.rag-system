@@ -1,1 +1,1 @@
-"""Answer generation helpers for the local LLM-backed RAG assistant."""
+"""Вспомогательные функции генерации ответов через локальную LLM для RAG-ассистента."""

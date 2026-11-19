@@ -1,1 +1,1 @@
-"""Source package for the Filmoskop RAG assistant prototype."""
+"""Пакет исходного кода прототипа RAG-ассистента «Фильмоскоп»."""

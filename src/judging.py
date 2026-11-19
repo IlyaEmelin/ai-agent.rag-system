@@ -1,1 +1,1 @@
-"""LLM-as-judge utilities for answer quality evaluation."""
+"""Утилиты LLM-as-judge для оценки качества ответов."""

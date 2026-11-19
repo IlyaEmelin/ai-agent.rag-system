@@ -1,1 +1,1 @@
-"""Diagnostics and reporting utilities for RAG experiments."""
+"""Утилиты диагностики и подготовки отчётов для RAG-экспериментов."""

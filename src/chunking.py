@@ -1,1 +1,1 @@
-"""Document chunking utilities for retrieval experiments."""
+"""Утилиты разбиения документов на чанки для retrieval-экспериментов."""

@@ -1,1 +1,1 @@
-"""Retrieval pipeline utilities for dense, sparse, and hybrid search."""
+"""Утилиты retrieval-пайплайна для dense, sparse и hybrid поиска."""

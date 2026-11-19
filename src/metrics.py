@@ -1,1 +1,1 @@
-"""Retrieval and generation metric utilities."""
+"""Утилиты расчёта retrieval- и generation-метрик."""

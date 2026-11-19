@@ -1,1 +1,1 @@
-"""Vector store helpers for the local Chroma prototype."""
+"""Вспомогательные функции векторного хранилища для локального прототипа Chroma."""
