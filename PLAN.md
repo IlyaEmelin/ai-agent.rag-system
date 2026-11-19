@@ -24,6 +24,7 @@
 - Embedding-модель по умолчанию: `intfloat/multilingual-e5-base`.
 - LLM: локальный сервер Qwen3.5 на `http://localhost:8080/`.
 - OpenAI-compatible base URL по умолчанию: `http://localhost:8080/v1`.
+- Для локальной Qwen reasoning/thinking-модели все OpenAI-compatible chat-completion вызовы генератора и LLM-судьи должны передавать `chat_template_kwargs.enable_thinking=false`, иначе сервер может вернуть рассуждения в `message.reasoning_content` при пустом `message.content`.
 - Reranker: `BAAI/bge-reranker-v2-m3`, включается при наличии ресурсов.
 - Основной формат сдачи: Jupyter Notebook + модульный код в `src/`.
 - Формат docstrings для функций: Google style на русском языке.
@@ -64,7 +65,7 @@ Get-ChildItem -Force
 
 ## 0.2. Создать рабочий `.env`
 
-**Статус:** `[ ]`
+**Статус:** `[x]`
 
 ### Задачи
 
@@ -88,13 +89,15 @@ git --no-pager status --short
 
 ## 0.3. Проверить локальный LLM-сервер
 
-**Статус:** `[ ]`
+**Статус:** `[x]`
 
 ### Задачи
 
 - Проверить, доступен ли сервер по `http://localhost:8080/`.
 - Проверить, поддерживает ли сервер OpenAI-compatible endpoint `/v1/models`.
 - Проверить тестовый chat-completion запрос.
+- Для Qwen reasoning/thinking-модели проверить chat-completion payload с `chat_template_kwargs.enable_thinking=false`.
+- Проверить, что проектный код получает финальный ответ именно в `choices[0].message.content`, а не только в `message.reasoning_content`.
 - Зафиксировать точный `LLM_BASE_URL` и `LLM_MODEL_NAME`.
 
 ### Команды проверки
@@ -112,7 +115,8 @@ PY
 
 - Endpoint `/v1/models` работает или найден альтернативный endpoint.
 - Известно точное имя модели для `.env`.
-- Тестовый запрос к LLM успешно возвращает ответ.
+- Тестовый запрос к LLM успешно возвращает непустой финальный ответ в `choices[0].message.content`.
+- Проверка через проектный OpenAI-compatible клиент также возвращает непустой `message.content`; UI-отображение reasoning output без `message.content` не считается выполнением пункта.
 
 ### Если проверка не прошла
 
@@ -551,11 +555,12 @@ python -c "import langchain; import chromadb; import sentence_transformers; prin
 - Реализовать создание chat model в `src/generation.py`.
 - Основной вариант: `langchain-openai.ChatOpenAI` с локальным `LLM_BASE_URL`.
 - Использовать `LLM_MODEL_NAME`, `LLM_TEMPERATURE`, `LLM_MAX_TOKENS`, `LLM_TIMEOUT_SECONDS`.
+- Для локальной Qwen reasoning/thinking-модели передавать в chat-completion payload `chat_template_kwargs={"enable_thinking": false}`; для `langchain-openai.ChatOpenAI` использовать поддерживаемый механизм дополнительных body-параметров OpenAI-клиента.
 - Проверить `temperature=0`.
 
 ### Критерии готовности
 
-- Тестовый prompt успешно обрабатывается локальной Qwen3.5-моделью.
+- Тестовый prompt успешно обрабатывается локальной Qwen3.5-моделью и возвращает непустой текст в `message.content`.
 - Ошибки подключения выводятся понятно.
 
 ## 5.2. Реализовать prompt для RAG-ответа
@@ -985,6 +990,126 @@ Gap-поведение: ...
 **Следующий шаг:**
 
 - Реализовать загрузку и первичный аудит `filmoskop_kb.json`.
+
+### 2026-11-19 — уточнение Qwen thinking mode и перепроверка пункта 0.3
+
+**Статус:** `[x]` завершено.
+
+**Изменённые файлы:**
+
+- `spec.md`;
+- `PLAN.md`.
+
+**Что сделано:**
+
+- В `spec.md` зафиксировано, что для локальной Qwen reasoning/thinking-модели OpenAI-compatible chat-completion payload должен включать `chat_template_kwargs.enable_thinking=false`.
+- В `spec.md` уточнено, что успешная генерация для RAG-пайплайна — это непустой финальный ответ в `choices[0].message.content`; текст только в `message.reasoning_content` не считается успешным результатом для проектного кода.
+- В `PLAN.md` уточнены техническая рамка, задачи и критерии готовности пункта `0.3`, а также требования к будущей реализации клиента LLM в пункте `5.1`.
+- Пункт `0.3. Проверить локальный LLM-сервер` перепроверен с отключённым thinking mode и переведён из `[!]` в `[x]`.
+
+**Проверки:**
+
+- `.\.venv\Scripts\python.exe .tmp_check_llm_content.py` — временный диагностический скрипт использовал `src.config.load_settings()`, отправил `POST http://localhost:8080/v1/chat/completions` с `chat_template_kwargs={"enable_thinking": false}` и получил `FINISH_REASON=stop`, `CONTENT_REPR='OK'`, `CONTENT_LEN=2`, `REASONING_PRESENT=False`, `RESULT=PASS`.
+- `git --no-pager diff --check` — пробельных ошибок в diff не найдено.
+
+**Ошибки и блокеры:**
+
+- Блокер пункта `0.3` снят.
+- Попытка проверки через OpenAI SDK не выполнялась до конца, потому что пакет `openai` отсутствует в текущем `.venv`; зависимости не менялись, итоговая проверка выполнена стандартной библиотекой Python через `urllib` и проектные настройки.
+- Временный файл `.tmp_check_llm_content.py` удалён после проверки.
+
+**Следующий шаг:**
+
+- Продолжить основной план с пункта `1.1. Загрузка датасета`; при реализации `src/generation.py` и `src/judging.py` передавать `chat_template_kwargs.enable_thinking=false` во все OpenAI-compatible chat-completion запросы.
+
+### 2026-11-19 — пункт 0.2 «Создать рабочий `.env`»
+
+**Статус:** `[x]` завершено.
+
+**Изменённые файлы:**
+
+- `PLAN.md`.
+
+**Что сделано:**
+
+- Прочитаны актуальные `spec.md`, `PLAN.md`, `.env.example`, `.gitignore`, `requirements.txt` и текущие модули `src/*.py`.
+- Подтверждено, что следующий незавершённый пункт основного плана — `0.2. Создать рабочий .env`.
+- Подтверждено, что локальный `.env` уже создан в корне проекта.
+- Подтверждено, что `.env` игнорируется правилом `/.env` из `.gitignore` и не отслеживается git.
+- Сверен набор ключей `.env` с `.env.example`: пропущенных и лишних ключей не найдено, в обоих файлах по 35 переменных.
+- Проверено наличие обязательных настроек запуска, включая `DATASET_PATH`, `RANDOM_SEED`, `LLM_BASE_URL`, `LLM_MODEL_NAME`, `JUDGE_MODEL_NAME`, параметры embeddings, Chroma, retrieval, reranker и `REFUSAL_PHRASE`.
+- Проверено, что `src.config.load_env_file()` и `src.config.load_settings()` успешно загружают локальные настройки из `.env`.
+
+**Проверки:**
+
+- `git --no-pager status --short` — перед изменениями рабочая директория была чистой.
+- `Get-ChildItem -Force` — подтверждено наличие `.env`, `.env.example`, `.gitignore`, `requirements.txt`, `spec.md`, `PLAN.md`, `filmoskop_kb.json`, `src/` и `notebooks/`.
+- `Get-ChildItem -Recurse -File src | Select-Object FullName` — просмотрен актуальный состав файлов `src/`.
+- `git --no-pager diff --check` — пробельных ошибок в текущем diff не найдено.
+- `Test-Path .env` — вернул `True`.
+- `git check-ignore -v .env` — подтвердил игнорирование `.env` правилом `.gitignore:3:/.env`.
+- `git ls-files --error-unmatch .env` — вернул ожидаемую ошибку pathspec, подтверждая, что `.env` не tracked-файл.
+- PowerShell-сравнение ключей `.env.example` и `.env` — `Missing in .env:` пусто, `Extra in .env:` пусто, количество ключей `35` и `35`.
+- PowerShell-проверка обязательных ключей `.env` — `All required .env keys are present.`
+- `.\.venv\Scripts\python.exe -c "from src.config import load_env_file, load_settings; ..."` — настройки успешно загружены, путь к датасету существует, имена LLM/Judge-моделей и фраза отказа заданы.
+
+**Ошибки и блокеры:**
+
+- Блокеров нет.
+- Точные значения секретов и локальных переменных из `.env` в журнал не выводились.
+- Фактическая доступность локального LLM-сервера и список моделей через `/v1/models` не проверялись в рамках этого пункта, потому что это отдельный следующий пункт `0.3`.
+
+**Следующий шаг:**
+
+- Выполнить пункт `0.3. Проверить локальный LLM-сервер`.
+
+### 2026-11-19 — пункт 0.3 «Проверить локальный LLM-сервер»
+
+**Статус:** `[!]` частично проверено, требуется настройка chat-completion.
+
+**Изменённые файлы:**
+
+- `PLAN.md`.
+
+**Что сделано:**
+
+- Прочитаны актуальные `spec.md`, `PLAN.md`, `.env.example`, `.gitignore`, `requirements.txt` и текущие модули `src/*.py`.
+- Подтверждено, что следующий незавершённый пункт основного плана — `0.3. Проверить локальный LLM-сервер`.
+- Проверена TCP-доступность локального сервера на `localhost:8080`.
+- Проверен root endpoint `http://localhost:8080/`: сервер отвечает, но на `GET /` возвращает `415 Unsupported Media Type`, поэтому root endpoint не используется как рабочий API.
+- Проверен OpenAI-compatible endpoint `http://localhost:8080/v1/models`: endpoint работает и возвращает список моделей.
+- Зафиксирован фактический model id сервера: `unsloth/Qwen3.5-4B-GGUF:Q4_K_M`.
+- Локальный игнорируемый `.env` синхронизирован с фактическим model id для `LLM_MODEL_NAME` и `JUDGE_MODEL_NAME`; значения секретов из `.env` не выводились.
+- Проверено, что `src.config.load_settings()` после синхронизации загружает `LLM_BASE_URL=http://localhost:8080/v1`, `JUDGE_BASE_URL=http://localhost:8080/v1` и фактические имена LLM/Judge-моделей.
+- Выполнены тестовые HTTP-запросы к `http://localhost:8080/v1/chat/completions` с текущим alias из `.env`, с точным model id из `/v1/models` и с `/no_think`-prompt.
+- После выявления Qwen thinking-mode поведения повторно проверен chat-completion payload с `chat_template_kwargs.enable_thinking=false` через текущую проектную конфигурацию `src.config.load_settings()`.
+
+**Проверки:**
+
+- `Test-NetConnection localhost -Port 8080` — `TcpTestSucceeded: True`.
+- `Invoke-RestMethod -Uri http://localhost:8080/ -Method Get -TimeoutSec 10` — сервер доступен, но вернул `415 Unsupported Media Type`.
+- `Invoke-RestMethod -Uri http://localhost:8080/v1/models -Method Get -TimeoutSec 10` — успешно вернул модель `unsloth/Qwen3.5-4B-GGUF:Q4_K_M`.
+- `.\.venv\Scripts\python.exe -c "from src.config import load_settings; ..."` — настройки LLM/Judge успешно загружаются из локального `.env`.
+- `Invoke-RestMethod -Uri http://localhost:8080/v1/chat/completions -Method Post ...` с `model=unsloth/Qwen3.5` — HTTP-запрос успешен, сервер фактически использует `unsloth/Qwen3.5-4B-GGUF:Q4_K_M`, но возвращает пустой `message.content`, непустой `reasoning_content` и `finish_reason=length`.
+- `Invoke-RestMethod -Uri http://localhost:8080/v1/chat/completions -Method Post ...` с `model=unsloth/Qwen3.5-4B-GGUF:Q4_K_M` — HTTP-запрос успешен, но результат аналогичный: пустой `message.content`, непустой `reasoning_content`, `finish_reason=length`.
+- `Invoke-RestMethod -Uri http://localhost:8080/v1/chat/completions -Method Post ...` с `/no_think` и увеличенным `max_tokens=256` — HTTP-запрос успешен, но финальный `message.content` всё ещё пустой, `reasoning_content` непустой, `finish_reason=length`.
+- `.\.venv\Scripts\python.exe .tmp_check_llm_content.py` с настройками из `src.config.load_settings()` и payload `chat_template_kwargs={"enable_thinking": false}` — успешно: `FINISH_REASON=stop`, `CONTENT_REPR='OK'`, `CONTENT_LEN=2`, `REASONING_PRESENT=False`, `RESULT=PASS`.
+- `git check-ignore -v .env` — подтвердил игнорирование `.env` правилом `.gitignore:3:/.env`.
+- `git --no-pager status --short --ignored` — показывает только tracked-изменение `PLAN.md` и ignored-артефакты `.env`, `.idea/`, `.venv/`, `src/__pycache__/`.
+- `git --no-pager diff --check` — пробельных ошибок в текущем diff не найдено.
+
+**Ошибки и блокеры:**
+
+- Блокер снят: критерий `Тестовый запрос к LLM успешно возвращает непустой финальный ответ в choices[0].message.content` выполнен при передаче `chat_template_kwargs.enable_thinking=false`.
+- Причина исходной проблемы подтверждена: для Qwen3.5 reasoning-модели на текущем локальном сервере без отключения thinking mode endpoint возвращал reasoning trace в `message.reasoning_content`, но не финальный answer content в `message.content`.
+- Root endpoint `GET http://localhost:8080/` возвращает `415 Unsupported Media Type`; это не блокирует OpenAI-compatible `/v1/models`, но подтверждает, что рабочим base URL должен оставаться `http://localhost:8080/v1`.
+- Команда `git --no-pager status --short --ignored=.env` была ошибочной для Git и вернула `fatal: Invalid ignored mode '.env'`; корректная проверка выполнена через `git check-ignore -v .env` и `git --no-pager status --short --ignored`.
+- Локальный `.env` изменён только в рабочем окружении и игнорируется git; в commit он не попадёт.
+- Первая попытка повторной проверки через OpenAI SDK не состоялась, потому что пакет `openai` не установлен в текущем `.venv`; финальная проверка выполнена без изменения зависимостей через стандартный `urllib` и текущий `src.config.load_settings()`.
+
+**Следующий шаг:**
+
+- Перейти к загрузке и первичному аудиту `filmoskop_kb.json`; при реализации `src/generation.py` и `src/judging.py` обязательно добавить `chat_template_kwargs.enable_thinking=false` во все OpenAI-compatible chat-completion вызовы.
 
 ### 2026-11-19 — пункт «Проверить исходное состояние репозитория»
 

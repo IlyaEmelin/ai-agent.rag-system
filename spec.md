@@ -70,6 +70,7 @@
 - Улучшение retrieval через гибридный поиск, RRF и/или reranker.
 - Reranker, вынесенный в настройки: `BAAI/bge-reranker-v2-m3`.
 - Генерация ответов через локальный LLM-сервер `http://localhost:8080/` с моделью Qwen3.5.
+- Для Qwen reasoning/thinking-моделей OpenAI-compatible chat-completion запросы должны отключать thinking mode через `chat_template_kwargs.enable_thinking=false`, чтобы финальный ответ попадал в `choices[0].message.content`, а не только в `message.reasoning_content`.
 - Все имена моделей и основные параметры вынесены в `.env` и задокументированы в `.env.example`.
 - LLM-as-judge для `faithfulness`, `answer relevance`, `correctness`.
 - Прогон всех 66 тестовых запросов.
@@ -155,6 +156,17 @@
 - Для OpenAI-compatible клиента рекомендуется использовать base URL с суффиксом `/v1`, если сервер его поддерживает: `http://localhost:8080/v1`.
 - Имя chat-модели должно задаваться через `.env`.
 - Температура генерации должна быть `0`.
+- Все OpenAI-compatible chat-completion вызовы генератора и LLM-судьи для локальной Qwen reasoning/thinking-модели должны передавать дополнительное поле payload:
+
+  ```json
+  {
+    "chat_template_kwargs": {
+      "enable_thinking": false
+    }
+  }
+  ```
+
+- Код проекта должен читать финальный ответ из `choices[0].message.content`; наличие текста только в `message.reasoning_content` не считается успешной генерацией для RAG-пайплайна.
 - Prompt должен явно запрещать выдумывать факты вне контекста.
 - Prompt должен содержать инструкцию вернуть согласованную фразу отказа, если ответа нет в контексте.
 - Контекст и вопрос должны быть разделены в prompt.
@@ -344,6 +356,7 @@ ai-agent.rag-system/
 - Локальный LLM-сервер доступен по адресу `http://localhost:8080/`.
 - Предполагается, что сервер предоставляет OpenAI-compatible API по адресу `http://localhost:8080/v1`. Если это не так, потребуется кастомный клиент или wrapper.
 - Название Qwen3.5-модели задаётся через `.env`, потому что конкретный model id зависит от локального сервера.
+- Для текущего локального сервера подтверждено поведение Qwen thinking mode: без `chat_template_kwargs.enable_thinking=false` endpoint может возвращать рассуждения в `message.reasoning_content`, пустой `message.content` и `finish_reason=length`; с `enable_thinking=false` возвращается непустой финальный `message.content` и `finish_reason=stop`.
 - Embedding-модель `intfloat/multilingual-e5-base` используется, если хватает ресурсов текущей машины.
 - Reranker включается только если хватает CPU/GPU/RAM и приемлема задержка.
 - Chroma используется только для прототипа.
