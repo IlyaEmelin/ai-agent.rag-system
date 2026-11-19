@@ -204,7 +204,7 @@ python -c "import langchain; import chromadb; import sentence_transformers; prin
 
 ## 1.1. Загрузка датасета
 
-**Статус:** `[ ]`
+**Статус:** `[x]`
 
 ### Задачи
 
@@ -1226,3 +1226,40 @@ Gap-поведение: ...
 **Следующий шаг:**
 
 - Реализовать загрузку и первичный аудит `filmoskop_kb.json`.
+
+### 2026-11-19 — пункт 1.1 «Загрузка датасета»
+
+**Статус:** `[x]` завершено.
+
+**Изменённые файлы:**
+
+- `PLAN.md`;
+- `src/data_loading.py`.
+
+**Что сделано:**
+
+- Прочитаны актуальные `spec.md`, `PLAN.md`, файлы `src/*.py`, `.env.example`, `requirements.txt` и структура `filmoskop_kb.json`.
+- В `src/data_loading.py` реализована основная функция `load_dataset(path)` для загрузки JSON-файла из пути, заданного настройкой `DATASET_PATH`.
+- Добавлен alias `load_filmoskop_dataset(path)` для явной привязки к текущему датасету проекта.
+- Добавлены immutable dataclass-модели `KnowledgeDocument`, `EvaluationQuery`, `FilmoskopDataset`.
+- Реализовано разделение `docs` и `queries` с проверкой обязательных полей документов: `doc_id`, `title`, `category`, `format`, `raw`.
+- Реализована проверка обязательных полей запросов: `query`, `kind`, `relevant_docs`, `gold`.
+- Добавлена проверка ожидаемых размеров датасета: `181` документ и `66` запросов.
+- Добавлена проверка уникальности `doc_id` и проверка, что все значения `relevant_docs` ссылаются на существующие документы.
+- Для отсутствующего файла реализована понятная ошибка `FileNotFoundError` с подсказкой проверить `DATASET_PATH` в `.env`.
+- Полный первичный аудит корпуса по категориям, форматам, длинам, HTML/Markdown, mojibake и подозрительным последовательностям не реализовывался, так как это отдельный следующий пункт `1.2`.
+
+**Проверки:**
+
+- `.\.venv\Scripts\python.exe -m py_compile src/data_loading.py` — синтаксис модуля корректен.
+- `.\.venv\Scripts\python.exe -c "from src.config import load_settings; from src.data_loading import load_dataset; ..."` — загрузка через `settings.data.dataset_path` успешна: `DOCS=181`, `QUERIES=66`, `FIRST_DOC_ID=0`, `FIRST_QUERY_KIND=exact`.
+- `.\.venv\Scripts\python.exe -c "from src.data_loading import load_dataset; ... load_dataset('missing_filmoskop_kb.json') ..."` — проверена понятная ошибка для отсутствующего файла: `Файл датасета не найден: missing_filmoskop_kb.json. Проверьте значение DATASET_PATH в .env.`
+
+**Ошибки и блокеры:**
+
+- Блокеров нет.
+- Первая попытка проверки отсутствующего файла завершилась `SyntaxError` из-за неверного экранирования многострочной команды Python в PowerShell; сама реализация не была причиной ошибки. Проверка повторена корректной командой и прошла успешно.
+
+**Следующий шаг:**
+
+- Перейти к пункту `1.2`: выполнить первичный аудит корпуса — распределения по категориям и форматам, длины `raw`, короткие и длинные документы, признаки HTML/Markdown-разметки, mojibake, мусорные символы и подозрительные последовательности.
