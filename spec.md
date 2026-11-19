@@ -68,7 +68,7 @@
 - Фильтрация по метаданным минимум на одном примере, например по категории «Подписка и оплата».
 - Диагностика слабых запросов.
 - Улучшение retrieval через гибридный поиск, RRF и/или reranker.
-- Reranker, вынесенный в настройки: `BAAI/bge-reranker-v2-m3` как основной вариант, `Qwen/Qwen3-Reranker-0.6B` как альтернативный вариант для эксперимента.
+- Reranker, вынесенный в настройки: `BAAI/bge-reranker-v2-m3`.
 - Генерация ответов через локальный LLM-сервер `http://localhost:8080/` с моделью Qwen3.5.
 - Все имена моделей и основные параметры вынесены в `.env` и задокументированы в `.env.example`.
 - LLM-as-judge для `faithfulness`, `answer relevance`, `correctness`.
@@ -248,7 +248,7 @@ DATASET_PATH=filmoskop_kb.json
   - `HuggingFacePipeline` как fallback для прямого локального запуска модели, если сервер недоступен.
 - **BM25** — sparse retrieval для гибридного поиска.
 - **RRF** — слияние dense и sparse результатов.
-- **Reranker** — `BAAI/bge-reranker-v2-m3` или альтернативно `Qwen/Qwen3-Reranker-0.6B`, включается через настройки при наличии ресурсов.
+- **Reranker** — `BAAI/bge-reranker-v2-m3`.
 - **LLM-as-judge** — тот же локальный LLM-сервер или отдельная judge-модель из `.env`.
 
 ### Почему Chroma
