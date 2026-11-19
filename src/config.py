@@ -383,10 +383,6 @@ def load_settings(env_path: str | Path | None = DEFAULT_ENV_PATH, *, override: b
 def load_env_file(env_path: Path = DEFAULT_ENV_PATH, *, override: bool = False) -> None:
     """Загружает переменные из dotenv-файла в ``os.environ``.
 
-    Функция использует ``python-dotenv``, если пакет установлен. Небольшой
-    fallback-парсер сохранён для того, чтобы базовые проверки конфигурации
-    работали до установки зависимостей проекта в виртуальное окружение.
-
     Аргументы:
         env_path: Путь к dotenv-файлу.
         override: Должны ли значения из dotenv-файла перезаписывать уже заданные
@@ -396,33 +392,9 @@ def load_env_file(env_path: Path = DEFAULT_ENV_PATH, *, override: bool = False) 
     if not env_path.exists():
         return
 
-    try:
-        from dotenv import load_dotenv
-    except ModuleNotFoundError:
-        _load_env_file_fallback(env_path, override=override)
-        return
+    from dotenv import load_dotenv
 
     load_dotenv(dotenv_path=env_path, override=override)
-
-
-def _load_env_file_fallback(env_path: Path, *, override: bool) -> None:
-    """Загружает простой dotenv-файл ``KEY=VALUE`` без внешних пакетов.
-
-    Аргументы:
-        env_path: Путь к dotenv-файлу.
-        override: Должны ли распарсенные значения перезаписывать уже заданные
-            переменные окружения.
-    """
-
-    for raw_line in env_path.read_text(encoding="utf-8").splitlines():
-        line = raw_line.strip()
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        key, value = line.split("=", maxsplit=1)
-        key = key.strip()
-        value = _strip_optional_quotes(value.strip())
-        if key and (override or key not in os.environ):
-            os.environ[key] = value
 
 
 def _get_str(name: str, default: str) -> str:
@@ -522,22 +494,6 @@ def _get_path(name: str, default: str) -> Path:
     if path.is_absolute():
         return path
     return PROJECT_ROOT / path
-
-
-def _strip_optional_quotes(value: str) -> str:
-    """Удаляет парные одинарные или двойные кавычки вокруг dotenv-значения.
-
-    Аргументы:
-        value: Сырое dotenv-значение.
-
-    Возвращает:
-        Значение без одной пары совпадающих внешних кавычек.
-    """
-
-    if len(value) >= 2 and value[0] == value[-1] and value[0] in {'"', "'"}:
-        return value[1:-1]
-    return value
-
 
 
 __all__ = [
