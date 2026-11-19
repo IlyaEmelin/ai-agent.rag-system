@@ -1,0 +1,1 @@
+"""Embedding model helpers for the RAG retrieval pipeline."""

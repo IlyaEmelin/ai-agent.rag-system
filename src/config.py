@@ -1,0 +1,1 @@
+"""Configuration helpers for the Filmoskop RAG assistant prototype."""

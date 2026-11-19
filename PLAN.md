@@ -163,7 +163,7 @@ python -c "import langchain; import chromadb; import sentence_transformers; prin
 
 ## 0.5. Создать структуру проекта
 
-**Статус:** `[ ]`
+**Статус:** `[x]`
 
 ### Задачи
 
@@ -820,7 +820,7 @@ Gap-поведение: ...
 
 1. `[x]` Исправить комментарий в `.env.example`, если он всё ещё называет основной reranker альтернативным.
 2. `[x]` Обновить `requirements.txt` под LangChain + Chroma.
-3. `[ ]` Создать `src/` и `notebooks/`.
+3. `[x]` Создать `src/` и `notebooks/`.
 4. `[ ]` Реализовать `src/config.py` и загрузку `.env`.
 5. `[ ]` Реализовать загрузку и первичный аудит `filmoskop_kb.json`.
 
@@ -897,3 +897,49 @@ Gap-поведение: ...
 **Следующий шаг:**
 
 - Создать `src/` и `notebooks/`.
+
+### 2026-11-19 — пункт «Создать `src/` и `notebooks/`»
+
+**Статус:** `[x]` завершено.
+
+**Изменённые файлы:**
+
+- `src/__init__.py`;
+- `src/config.py`;
+- `src/data_loading.py`;
+- `src/cleaning.py`;
+- `src/chunking.py`;
+- `src/embeddings.py`;
+- `src/vector_store.py`;
+- `src/retrieval.py`;
+- `src/metrics.py`;
+- `src/generation.py`;
+- `src/judging.py`;
+- `src/diagnostics.py`;
+- `notebooks/rag_filmoskop_project.ipynb`;
+- `PLAN.md`.
+
+**Что сделано:**
+
+- Создана директория `src/` с базовыми модулями, перечисленными в `spec.md` и пункте `0.5`.
+- Создана директория `notebooks/` с notebook-файлом `rag_filmoskop_project.ipynb`.
+- В модули `src/` добавлены только краткие module docstrings без реализации логики следующих пунктов плана.
+- Notebook создан как минимальный валидный Jupyter Notebook с вводной markdown-ячейкой.
+- В списке ближайших задач текущий пункт отмечен как выполненный.
+
+**Проверки:**
+
+- `Get-ChildItem -Force src` и `Get-ChildItem -Force notebooks` подтвердили наличие созданных файлов.
+- `.\.venv\Scripts\python.exe -m json.tool notebooks/rag_filmoskop_project.ipynb` подтвердил, что notebook является валидным JSON.
+- `.\.venv\Scripts\python.exe -c "from pathlib import Path; ..."` подтвердил наличие всех файлов из пункта `0.5`: `missing: []`.
+- `git --no-pager diff -- PLAN.md requirements.txt .gitignore .env.example spec.md` и `git --no-pager status --short` выполнены после изменений.
+
+**Ошибки и блокеры:**
+
+- Блокеров нет.
+- Реализация функций не выполнялась, так как следующий пункт ограничен созданием структуры проекта.
+- Первая попытка Python-проверки списка файлов была запущена через bash-style heredoc `<<'PY'`, который не поддерживается PowerShell; команда заменена на корректный вызов `.\.venv\Scripts\python.exe -c "..."` и успешно выполнена.
+
+**Следующий шаг:**
+
+- Реализовать `src/config.py` и загрузку `.env`.
