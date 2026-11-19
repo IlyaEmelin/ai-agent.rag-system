@@ -254,7 +254,7 @@ python -c "import langchain; import chromadb; import sentence_transformers; prin
 
 ## 1.3. Очистка и нормализация
 
-**Статус:** `[ ]`
+**Статус:** `[x]`
 
 ### Задачи
 
@@ -830,7 +830,9 @@ Gap-поведение: ...
 2. `[x]` Обновить `requirements.txt` под LangChain + Chroma.
 3. `[x]` Создать `src/` и `notebooks/`.
 4. `[x]` Реализовать `src/config.py` и загрузку `.env`.
-5. `[ ]` Реализовать загрузку и первичный аудит `filmoskop_kb.json`.
+5. `[x]` Реализовать загрузку и первичный аудит `filmoskop_kb.json`.
+6. `[x]` Реализовать очистку и нормализацию корпуса.
+7. `[ ]` Подготовить LangChain Documents из очищенного корпуса.
 
 ## Журнал выполнения
 
@@ -1324,3 +1326,64 @@ Gap-поведение: ...
 **Следующий шаг:**
 
 - Перейти к пункту `1.3`: реализовать очистку и нормализацию корпуса — очистку HTML, очистку Markdown без потери смысла, осторожное исправление mojibake, нормализацию пробелов/переносов и сравнение качества «было → стало».
+
+### 2026-11-19 — пункт 1.3 «Очистка и нормализация»
+
+**Статус:** `[x]` завершено.
+
+**Изменённые файлы:**
+
+- `PLAN.md`;
+- `src/cleaning.py`;
+- `src/diagnostics.py`;
+- `notebooks/rag_filmoskop_project.ipynb`.
+
+**Что сделано:**
+
+- В `src/cleaning.py` реализована очистка корпуса без удаления документов:
+  - извлечение читаемого текста из HTML на стандартной библиотеке через `HTMLParser`;
+  - очистка Markdown-маркеров заголовков, списков, ссылок, выделения, inline-code и таблиц без удаления содержательного текста;
+  - осторожное исправление mojibake только при уверенном улучшении эвристик: меньше mojibake-маркеров и больше кириллицы;
+  - нормализация Unicode, пробелов и переносов строк;
+  - функции `clean_text()`, `clean_document()` и `clean_corpus()` с результатом `CleanedDocumentResult`.
+- В `src/diagnostics.py` добавлены отчётные функции для этапа очистки:
+  - `compare_corpus_quality()` для сравнения качества «было → стало»;
+  - `build_cleaning_operations_table()` для сводки выполненных операций;
+  - `build_cleaning_examples_table()` для примеров документов до и после очистки.
+- В `notebooks/rag_filmoskop_project.ipynb` добавлены ячейки этапа `1.3`:
+  - построение `cleaned_docs`;
+  - аудит очищенного корпуса;
+  - таблица операций очистки;
+  - сравнение метрик качества;
+  - примеры документов до/после;
+  - markdown-вывод с принятыми решениями.
+- Количество документов после очистки сохранено: `181`; удаление коротких, длинных и дублирующихся документов не выполнялось, чтобы не потерять данные до retrieval-экспериментов.
+
+**Результаты очистки:**
+
+- `documents`: `181 → 181` (`delta 0`).
+- `html_documents`: `21 → 0` (`delta -21`).
+- `markdown_documents`: `29 → 0` (`delta -29`).
+- `mojibake_documents`: `17 → 1` (`delta -16`).
+- `suspicious_documents`: `1 → 1` (`delta 0`).
+- `duplicate_groups`: `6 → 7` (`delta +1`), что ожидаемо после нормализации разметки и кодировки: часть текстов стала более сопоставимой.
+- `median_raw_length`: `664 → 578`.
+- `max_raw_length`: `3057 → 2150`.
+- Операции по документам: `unchanged=112`, `whitespace_normalized=54`, `markdown_cleaned=30`, `html_cleaned=21`, `mojibake_fixed=16`.
+
+**Проверки:**
+
+- `.\.venv\Scripts\python.exe -m py_compile src/cleaning.py src/diagnostics.py` — синтаксис модулей корректен.
+- `.\.venv\Scripts\python.exe -c "from src.config import load_settings; from src.data_loading import load_dataset; from src.cleaning import clean_corpus; from src.diagnostics import audit_corpus, compare_corpus_quality, build_cleaning_operations_table, build_cleaning_examples_table; ..."` — очистка 181 документа, повторный аудит очищенного корпуса и таблицы отчёта успешно строятся.
+- `.\.venv\Scripts\python.exe -c "import json; from pathlib import Path; nb=json.loads(Path('notebooks/rag_filmoskop_project.ipynb').read_text(encoding='utf-8')); print('NOTEBOOK_JSON_OK'); print('CELLS=' + str(len(nb['cells'])))"` — notebook остаётся валидным JSON, количество ячеек `20`.
+
+**Ошибки и блокеры:**
+
+- Блокеров нет.
+- Один документ с символом `�` остаётся в `mojibake_documents`/`suspicious_documents`: replacement character означает потерю исходных байтов, поэтому автоматическое восстановление не выполняется, чтобы не исказить факты.
+- У очищенного корпуса стало `7` групп дублей вместо `6`: нормализация разметки/кодировки повысила похожесть части документов. Автоматическое удаление дублей не выполнялось; это решение нужно принимать после влияния на retrieval.
+- Первый патч `src/diagnostics.py` не применился из-за несовпадения контекста; изменения внесены меньшими точечными патчами без изменения требований пункта.
+
+**Следующий шаг:**
+
+- Перейти к пункту `2.1`: подготовить `langchain_core.documents.Document` из очищенного корпуса с metadata `doc_id`, `title`, `category`, `format`.

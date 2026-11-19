@@ -7,6 +7,7 @@ from difflib import SequenceMatcher
 from typing import Any, Iterable, Sequence
 
 from src.cleaning import (
+    CleanedDocumentResult,
     get_text_quality_flags,
     normalize_text_for_duplicate_detection,
     text_similarity,
@@ -106,10 +107,7 @@ class AuditTable:
                 display_row["index"] = row_index
             display_rows.append(display_row)
         widths = {
-            column: max(
-                len(str(column)),
-                *(len(_stringify(row.get(column, ""))) for row in display_rows),
-            )
+            column: max([len(str(column)), *(len(_stringify(row.get(column, ""))) for row in display_rows)])
             for column in columns
         }
         header = "  ".join(str(column).ljust(widths[column]) for column in columns)
@@ -441,6 +439,109 @@ def duplicate_groups_to_dataframe(duplicate_groups: Sequence[DuplicateGroup]) ->
     )
 
 
+def compare_corpus_quality(before: CorpusAudit, after: CorpusAudit) -> AuditTable:
+    """Строит сводку метрик качества корпуса до и после очистки.
+
+    Аргументы:
+        before: Аудит исходного корпуса.
+        after: Аудит очищенного корпуса.
+
+    Возвращает:
+        Таблицу ``metric / before / after / delta``.
+    """
+
+    metrics = (
+        ("documents", before.total_documents, after.total_documents),
+        ("html_documents", len(before.html_documents), len(after.html_documents)),
+        ("markdown_documents", len(before.markdown_documents), len(after.markdown_documents)),
+        ("mojibake_documents", len(before.mojibake_documents), len(after.mojibake_documents)),
+        ("suspicious_documents", len(before.suspicious_documents), len(after.suspicious_documents)),
+        ("duplicate_groups", len(before.duplicate_groups), len(after.duplicate_groups)),
+        ("min_raw_length", _length_stat_value(before, "min"), _length_stat_value(after, "min")),
+        ("median_raw_length", _length_stat_value(before, "median"), _length_stat_value(after, "median")),
+        ("max_raw_length", _length_stat_value(before, "max"), _length_stat_value(after, "max")),
+    )
+    rows = [
+        {
+            "metric": metric,
+            "before": before_value,
+            "after": after_value,
+            "delta": after_value - before_value,
+        }
+        for metric, before_value, after_value in metrics
+    ]
+    return _make_table(rows, ("metric", "before", "after", "delta"))
+
+
+def build_cleaning_operations_table(cleaned_results: Sequence[CleanedDocumentResult]) -> AuditTable:
+    """Сводит количество документов по выполненным операциям очистки.
+
+    Аргументы:
+        cleaned_results: Результаты очистки корпуса.
+
+    Возвращает:
+        Таблицу с числом документов на каждую операцию.
+    """
+
+    counts: dict[str, int] = {}
+    for result in cleaned_results:
+        operations = result.operations or ("unchanged",)
+        for operation in operations:
+            counts[operation] = counts.get(operation, 0) + 1
+
+    rows = [
+        {"operation": operation, "documents": count}
+        for operation, count in sorted(counts.items(), key=lambda item: (-item[1], item[0]))
+    ]
+    return _make_table(rows, ("operation", "documents"))
+
+
+def build_cleaning_examples_table(
+    cleaned_results: Sequence[CleanedDocumentResult],
+    *,
+    max_examples: int = 12,
+) -> AuditTable:
+    """Готовит примеры документов до и после очистки.
+
+    Аргументы:
+        cleaned_results: Результаты очистки корпуса.
+        max_examples: Максимальное число примеров в таблице.
+
+    Возвращает:
+        Таблицу с превью исходного и очищенного текста.
+    """
+
+    rows: list[dict[str, Any]] = []
+    changed_results = [result for result in cleaned_results if result.original_document.raw != result.cleaned_document.raw]
+    changed_results.sort(key=lambda result: abs(result.raw_length_before - result.raw_length_after), reverse=True)
+    for result in changed_results[:max_examples]:
+        rows.append(
+            {
+                "doc_id": result.original_document.doc_id,
+                "title": result.original_document.title,
+                "format": result.original_document.format,
+                "operations": ", ".join(result.operations),
+                "length_before": result.raw_length_before,
+                "length_after": result.raw_length_after,
+                "before_preview": _preview(result.original_document.raw),
+                "after_preview": _preview(result.cleaned_document.raw),
+            }
+        )
+    return _make_table(
+        rows,
+        (
+            "doc_id",
+            "title",
+            "format",
+            "operations",
+            "length_before",
+            "length_after",
+            "before_preview",
+            "after_preview",
+        ),
+    )
+
+
 def build_problem_decisions(
     *,
     html_count: int,
@@ -560,6 +661,15 @@ def _quantile(values: Sequence[int], quantile: float) -> int:
     return sorted_values[index]
 
 
+def _length_stat_value(audit: CorpusAudit, metric: str) -> int:
+    """Достаёт числовое значение из таблицы статистик длины."""
+
+    for row in audit.length_statistics.rows:
+        if row.get("metric") == metric:
+            return int(row["value"])
+    raise ValueError(f"В length_statistics отсутствует метрика: {metric}")
+
+
 def _lengths_are_comparable(left: str, right: str) -> bool:
     """Проверяет, имеет ли смысл сравнивать два текста как почти дубли.
 
@@ -661,10 +771,13 @@ __all__ = [
     "DEFAULT_SHORT_QUANTILE",
     "DuplicateGroup",
     "audit_corpus",
+    "build_cleaning_examples_table",
+    "build_cleaning_operations_table",
     "build_distribution_table",
     "build_document_profile",
     "build_length_statistics",
     "build_problem_decisions",
+    "compare_corpus_quality",
     "duplicate_groups_to_dataframe",
     "find_duplicate_groups",
     "print_audit_summary",

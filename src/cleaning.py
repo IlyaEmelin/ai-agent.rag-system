@@ -1,9 +1,4 @@
-﻿"""Утилиты очистки и нормализации текстов корпуса «Фильмоскоп».
-
-На этапе первичного аудита модуль содержит только безопасные эвристики: они не
-меняют корпус, а помогают найти документы, которые требуют решения на следующем
-этапе очистки.
-"""
+"""Утилиты очистки и нормализации текстов корпуса «Фильмоскоп»."""
 
 from __future__ import annotations
 
@@ -12,6 +7,10 @@ import re
 import unicodedata
 from dataclasses import dataclass
 from difflib import SequenceMatcher
+from html.parser import HTMLParser
+from typing import Sequence
+
+from src.data_loading import KnowledgeDocument
 
 
 HTML_TAG_PATTERN = re.compile(r"</?[a-zA-Z][a-zA-Z0-9]*(?:\s+[^<>]*)?>")
@@ -33,6 +32,82 @@ SUSPICIOUS_SEQUENCE_PATTERNS = (
     re.compile(r"[-_=*#]{6,}"),
     re.compile(r"\s{5,}"),
 )
+BLOCK_HTML_TAGS = frozenset(
+    {
+        "address",
+        "article",
+        "aside",
+        "blockquote",
+        "br",
+        "dd",
+        "div",
+        "dl",
+        "dt",
+        "figcaption",
+        "figure",
+        "footer",
+        "h1",
+        "h2",
+        "h3",
+        "h4",
+        "h5",
+        "h6",
+        "header",
+        "hr",
+        "li",
+        "main",
+        "nav",
+        "ol",
+        "p",
+        "pre",
+        "section",
+        "table",
+        "td",
+        "th",
+        "tr",
+        "ul",
+    }
+)
+MARKDOWN_LINK_PATTERN = re.compile(r"!?\[([^\]\n]*)\]\(([^\)\n]+)\)")
+MARKDOWN_HEADING_PATTERN = re.compile(r"(?m)^\s{0,3}#{1,6}\s+")
+MARKDOWN_LIST_PATTERN = re.compile(r"(?m)^\s*(?:[-*+]\s+|\d+[.)]\s+)")
+MARKDOWN_BLOCKQUOTE_PATTERN = re.compile(r"(?m)^\s{0,3}>\s?")
+MARKDOWN_TABLE_SEPARATOR_PATTERN = re.compile(r"(?m)^\s*\|?\s*:?-{3,}:?\s*(?:\|\s*:?-{3,}:?\s*)+\|?\s*$")
+MARKDOWN_DECORATION_PATTERN = re.compile(r"(?<!\w)(?:\*\*|__)([^\n]+?)(?:\*\*|__)(?!\w)|(?<!\w)(?:\*|_)([^\n]+?)(?:\*|_)(?!\w)")
+MARKDOWN_CODE_MARKER_PATTERN = re.compile(r"`{1,3}([^`\n]+)`{1,3}")
+
+
+class _ReadableHtmlParser(HTMLParser):
+    """Минимальный извлекатель читаемого текста из HTML на стандартной библиотеке."""
+
+    def __init__(self) -> None:
+        """Инициализирует буфер извлечённого текста."""
+
+        super().__init__(convert_charrefs=True)
+        self._parts: list[str] = []
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        """Добавляет разделитель перед блочными HTML-тегами."""
+
+        if tag.lower() in BLOCK_HTML_TAGS:
+            self._parts.append("\n")
+
+    def handle_endtag(self, tag: str) -> None:
+        """Добавляет разделитель после блочных HTML-тегов."""
+
+        if tag.lower() in BLOCK_HTML_TAGS:
+            self._parts.append("\n")
+
+    def handle_data(self, data: str) -> None:
+        """Сохраняет текстовые данные HTML-документа."""
+
+        if data:
+            self._parts.append(data)
+
+    def get_text(self) -> str:
+        """Возвращает извлечённый текст."""
+
+        return "".join(self._parts)
 
 
 @dataclass(frozen=True)
@@ -67,6 +142,25 @@ class DuplicateMatch:
     right_doc_id: int
     similarity: float
     match_type: str
+
+
+@dataclass(frozen=True)
+class CleanedDocumentResult:
+    """Результат очистки одного документа корпуса.
+
+    Атрибуты:
+        original_document: Исходный документ без изменений.
+        cleaned_document: Документ с очищенным текстом в поле ``raw``.
+        operations: Выполненные операции очистки.
+        raw_length_before: Длина исходного текста.
+        raw_length_after: Длина очищенного текста.
+    """
+
+    original_document: KnowledgeDocument
+    cleaned_document: KnowledgeDocument
+    operations: tuple[str, ...]
+    raw_length_before: int
+    raw_length_after: int
 
 
 def has_html_markup(text: str) -> bool:
@@ -189,14 +283,218 @@ def text_similarity(left: str, right: str) -> float:
     return SequenceMatcher(a=left, b=right, autojunk=False).ratio()
 
 
+def clean_html_markup(text: str) -> str:
+    """Извлекает читаемый текст из HTML без потери смысловых блоков.
+
+    Аргументы:
+        text: Исходный текст, возможно содержащий HTML-теги и entities.
+
+    Возвращает:
+        Текст без HTML-тегов, с декодированными HTML entities и сохранёнными
+        разделителями между блочными элементами.
+    """
+
+    parser = _ReadableHtmlParser()
+    parser.feed(text)
+    parser.close()
+    extracted = parser.get_text()
+    if not extracted.strip() and text.strip():
+        extracted = HTML_TAG_PATTERN.sub(" ", text)
+    return html.unescape(extracted)
+
+
+def clean_markdown_markup(text: str) -> str:
+    """Убирает служебные символы Markdown, сохраняя смысл текста.
+
+    Аргументы:
+        text: Исходный текст, возможно содержащий Markdown-разметку.
+
+    Возвращает:
+        Текст без основных Markdown-маркеров заголовков, списков, ссылок,
+        выделения, inline-code и таблиц.
+    """
+
+    cleaned = text.replace("\r\n", "\n").replace("\r", "\n")
+    cleaned = re.sub(r"(?m)^```.*$", "", cleaned)
+    cleaned = MARKDOWN_LINK_PATTERN.sub(lambda match: match.group(1) or match.group(2), cleaned)
+    cleaned = MARKDOWN_TABLE_SEPARATOR_PATTERN.sub("", cleaned)
+    cleaned = MARKDOWN_HEADING_PATTERN.sub("", cleaned)
+    cleaned = MARKDOWN_LIST_PATTERN.sub("", cleaned)
+    cleaned = MARKDOWN_BLOCKQUOTE_PATTERN.sub("", cleaned)
+    cleaned = MARKDOWN_CODE_MARKER_PATTERN.sub(lambda match: match.group(1), cleaned)
+    cleaned = MARKDOWN_DECORATION_PATTERN.sub(lambda match: match.group(1) or match.group(2) or "", cleaned)
+    cleaned = re.sub(r"(?m)^\s*\|(.+)\|\s*$", lambda match: " ".join(part.strip() for part in match.group(1).split("|")), cleaned)
+    return cleaned
+
+
+def fix_mojibake_if_confident(text: str) -> tuple[str, bool]:
+    """Исправляет mojibake только при уверенном улучшении текста.
+
+    Эвристика применяет обратное преобразование для частого случая, когда UTF-8
+    байты были ошибочно прочитаны как однобайтовая кодировка. Исправление
+    принимается только если после него становится меньше mojibake-маркеров и
+    больше кириллических символов.
+
+    Аргументы:
+        text: Проверяемый текст.
+
+    Возвращает:
+        Пару ``(текст, исправлено ли)``.
+    """
+
+    original_marker_count = _count_mojibake_markers(text)
+    if original_marker_count == 0:
+        return text, False
+
+    best_candidate = text
+    best_score = _mojibake_repair_score(text)
+    for source_encoding in ("latin1", "cp1252"):
+        try:
+            candidate = text.encode(source_encoding).decode("utf-8")
+        except UnicodeError:
+            continue
+        candidate_score = _mojibake_repair_score(candidate)
+        if candidate_score > best_score:
+            best_candidate = candidate
+            best_score = candidate_score
+
+    if best_candidate == text:
+        return text, False
+    if _count_mojibake_markers(best_candidate) >= original_marker_count:
+        return text, False
+    if _count_cyrillic_letters(best_candidate) <= _count_cyrillic_letters(text):
+        return text, False
+    return best_candidate, True
+
+
+def normalize_whitespace(text: str) -> str:
+    """Нормализует пробелы и переносы строк в очищенном тексте.
+
+    Аргументы:
+        text: Текст после исправления кодировки и очистки разметки.
+
+    Возвращает:
+        Текст с едиными переносами строк, без лишних пробелов и пустых строк.
+    """
+
+    normalized = unicodedata.normalize("NFKC", text)
+    normalized = normalized.replace("\r\n", "\n").replace("\r", "\n")
+    normalized = re.sub(r"[\t\f\v]+", " ", normalized)
+    normalized = re.sub(r"[ \u00a0]{2,}", " ", normalized)
+    normalized = re.sub(r" *\n *", "\n", normalized)
+    normalized = re.sub(r"\n{3,}", "\n\n", normalized)
+    return normalized.strip()
+
+
+def clean_text(text: str, *, source_format: str = "text") -> tuple[str, tuple[str, ...]]:
+    """Очищает один текст корпуса и возвращает список выполненных операций.
+
+    Аргументы:
+        text: Исходный текст документа.
+        source_format: Исходный формат документа из датасета.
+
+    Возвращает:
+        Пару ``(очищенный текст, операции)``.
+    """
+
+    operations: list[str] = []
+    cleaned = text
+
+    repaired, was_repaired = fix_mojibake_if_confident(cleaned)
+    if was_repaired:
+        cleaned = repaired
+        operations.append("mojibake_fixed")
+
+    if source_format == "html" or has_html_markup(cleaned):
+        cleaned = clean_html_markup(cleaned)
+        operations.append("html_cleaned")
+
+    if source_format == "markdown" or has_markdown_markup(cleaned):
+        cleaned = clean_markdown_markup(cleaned)
+        operations.append("markdown_cleaned")
+
+    normalized = normalize_whitespace(cleaned)
+    if normalized != cleaned:
+        operations.append("whitespace_normalized")
+    cleaned = normalized
+
+    return cleaned, tuple(dict.fromkeys(operations))
+
+
+def clean_document(document: KnowledgeDocument) -> CleanedDocumentResult:
+    """Очищает один документ базы знаний.
+
+    Аргументы:
+        document: Исходный документ корпуса.
+
+    Возвращает:
+        Результат очистки с исходным и очищенным документом.
+    """
+
+    cleaned_text, operations = clean_text(document.raw, source_format=document.format)
+    cleaned_document = KnowledgeDocument(
+        doc_id=document.doc_id,
+        title=document.title,
+        category=document.category,
+        format=document.format,
+        raw=cleaned_text,
+    )
+    return CleanedDocumentResult(
+        original_document=document,
+        cleaned_document=cleaned_document,
+        operations=operations,
+        raw_length_before=len(document.raw),
+        raw_length_after=len(cleaned_text),
+    )
+
+
+def clean_corpus(documents: Sequence[KnowledgeDocument]) -> list[CleanedDocumentResult]:
+    """Очищает корпус документов без удаления записей.
+
+    Аргументы:
+        documents: Документы базы знаний.
+
+    Возвращает:
+        Список результатов очистки в исходном порядке документов.
+    """
+
+    return [clean_document(document) for document in documents]
+
+
+def _count_mojibake_markers(text: str) -> int:
+    """Считает суммарное число mojibake-маркеров в тексте."""
+
+    return sum(text.count(marker) for marker in MOJIBAKE_MARKERS)
+
+
+def _count_cyrillic_letters(text: str) -> int:
+    """Считает кириллические буквы в тексте."""
+
+    return sum(1 for char in text if "CYRILLIC" in unicodedata.name(char, ""))
+
+
+def _mojibake_repair_score(text: str) -> int:
+    """Оценивает качество текста для выбора уверенного исправления mojibake."""
+
+    return _count_cyrillic_letters(text) * 3 - _count_mojibake_markers(text) * 20 - text.count("�") * 50
+
+
 __all__ = [
+    "CleanedDocumentResult",
     "DuplicateMatch",
     "TextQualityFlags",
+    "clean_corpus",
+    "clean_document",
+    "clean_html_markup",
+    "clean_markdown_markup",
+    "clean_text",
     "find_mojibake_markers",
     "find_suspicious_sequences",
+    "fix_mojibake_if_confident",
     "get_text_quality_flags",
     "has_html_markup",
     "has_markdown_markup",
+    "normalize_whitespace",
     "normalize_text_for_duplicate_detection",
     "text_similarity",
 ]
