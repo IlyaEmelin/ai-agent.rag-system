@@ -119,7 +119,7 @@ PY
 
 ## 0.4. Обновить зависимости
 
-**Статус:** `[ ]`
+**Статус:** `[x]`
 
 ### Задачи
 
@@ -819,7 +819,7 @@ Gap-поведение: ...
 # Ближайшие следующие задачи
 
 1. `[x]` Исправить комментарий в `.env.example`, если он всё ещё называет основной reranker альтернативным.
-2. `[ ]` Обновить `requirements.txt` под LangChain + Chroma.
+2. `[x]` Обновить `requirements.txt` под LangChain + Chroma.
 3. `[ ]` Создать `src/` и `notebooks/`.
 4. `[ ]` Реализовать `src/config.py` и загрузку `.env`.
 5. `[ ]` Реализовать загрузку и первичный аудит `filmoskop_kb.json`.
@@ -856,3 +856,44 @@ Gap-поведение: ...
 **Следующий шаг:**
 
 - Обновить `requirements.txt` под LangChain + Chroma.
+
+### 2026-11-19 — пункт «Обновить `requirements.txt` под LangChain + Chroma»
+
+**Статус:** `[x]` завершено.
+
+**Изменённые файлы:**
+
+- `requirements.txt`;
+- `PLAN.md`.
+
+**Что сделано:**
+
+- Проверены актуальные `spec.md`, `PLAN.md`, `.env.example`, `.gitignore`, `requirements.txt` и состояние рабочей директории.
+- В `requirements.txt` добавлены зависимости для LangChain + Chroma стека: `python-dotenv`, `langchain`, `langchain-core`, `langchain-community`, `langchain-openai`, `langchain-chroma`, `chromadb`.
+- Добавлены вспомогательные зависимости из плана для hybrid retrieval, очистки/парсинга, метрик, визуализаций и notebook-среды: `rank-bm25`, `beautifulsoup4`, `lxml`, `tqdm`, `scikit-learn`, `matplotlib`, `seaborn`, `jupyter`, `notebook`.
+- Сохранены существующие зафиксированные версии `torch`, `numpy`, `openai`, `sentence-transformers`, `transformers`, `ipywidgets`, `jupyterlab_widgets`, `widgetsnbextension`, `pandas`.
+- Целевое окружение проекта — `.venv` с Python 3.11.9, как в уроках; поэтому сохранён pin `torch==2.5.1+cu121`.
+- В списке ближайших задач текущий пункт отмечен как выполненный.
+
+**Проверки:**
+
+- Проверено, что проектное окружение `.venv` использует `Python 3.11.9`.
+- Проверено, что pip из `.venv` используется из `C:\PythonProg\ai-agent.rag-system\.venv\Lib\site-packages\pip`.
+- `.\.venv\Scripts\python.exe -m pip index versions torch` — подтвердил, что для Python 3.11 доступна версия `torch 2.5.1`.
+- Глобальный `python` в консоли указывает на Python 3.13.17, поэтому проверки зависимостей нужно выполнять явно через `.\.venv\Scripts\python.exe`, а не через неуточнённый `python`.
+- `.\.venv\Scripts\python.exe -m pip install --dry-run --no-deps -r requirements.txt` не завершилась за лимит команды 30 секунд, вероятно из-за обращения к index/metadata PyTorch.
+- `.\.venv\Scripts\python.exe -m pip show torch` — подтвердил, что `torch` пока не установлен в `.venv`.
+- `.\.venv\Scripts\python.exe -c "import torch"` — ожидаемо завершился с `ModuleNotFoundError`, так как установка зависимостей не выполнялась.
+- `git --no-pager diff -- requirements.txt PLAN.md` и `git --no-pager status --short` выполнены после изменений.
+
+**Ошибки и блокеры:**
+
+- Блокеров нет.
+- Предыдущее изменение `torch==2.6.0` было основано на проверке глобального Python 3.13.17 и отменено как не соответствующее целевому `.venv` окружению проекта.
+- Для проекта нужно использовать `.venv` с Python 3.11.9 и `torch==2.5.1+cu121`.
+- Зависимости в `.venv` пока не установлены; импорт `torch` не проходит до выполнения `pip install -r requirements.txt`.
+- Перед финальной сдачей стоит выполнить обычный `.\.venv\Scripts\python.exe -m pip install -r requirements.txt` в целевом окружении.
+
+**Следующий шаг:**
+
+- Создать `src/` и `notebooks/`.
