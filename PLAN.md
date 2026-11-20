@@ -333,15 +333,15 @@ python -c "import langchain; import chromadb; import sentence_transformers; prin
 
 - `RecursiveCharacterTextSplitter`.
 - Значения по умолчанию из `.env`:
-  - `CHUNK_SIZE=900`;
-  - `CHUNK_OVERLAP=150`.
+  - `CHUNK_SIZE=600`;
+  - `CHUNK_OVERLAP=100`.
 - Для документов с `format=markdown` проверить Markdown-aware splitting, чтобы использовать сохранённые заголовки, списки и таблицы вместо предварительного удаления Markdown-разметки.
 
 ### Стратегия B
 
 - Альтернативная стратегия из `.env`:
-  - `ALT_CHUNK_SIZE=600`;
-  - `ALT_CHUNK_OVERLAP=100`.
+  - `ALT_CHUNK_SIZE=450`;
+  - `ALT_CHUNK_OVERLAP=80`.
 - Допустимо заменить на semantic/structure-aware splitting, если анализ корпуса покажет пользу.
 
 ### Критерии готовности
@@ -1879,6 +1879,26 @@ Gap-поведение: ...
   - `4.5` — таблицы сравнения `dense_baseline` → `bm25` → `hybrid_rrf`, разбивка по типам запросов и latency на небольшой выборке.
 - Reranker `BAAI/bge-reranker-v2-m3` не подключался как тяжёлая модель на этом шаге: в `.env.example` он уже вынесен в настройки, а текущая конфигурация `RERANKER_ENABLED=false` соответствует критерию этапа `4.4` с обоснованием ресурсы/latency/сложность.
 
+**Повторный retrieval-эксперимент на реальных embeddings:**
+
+- Проверены варианты чанкинга `900/150`, `600/100`, `450/80`, каждый в двух версиях индексируемого текста:
+  - только тело чанка;
+  - `Название: {title}\nКатегория: {category}\nТекст:\n{chunk}` для каждого чанка.
+- Проверены методы `dense`, `bm25`, `hybrid_rrf` с `fetch_k=20/40` и `RRF_K=30/60`.
+- Лучший вариант по целевой метрике `recall@5`:
+  - indexed text: `title + category + chunk text`;
+  - chunking: `CHUNK_SIZE=600`, `CHUNK_OVERLAP=100`;
+  - retrieval: `hybrid_rrf`, `RETRIEVAL_TOP_K=5`, `RETRIEVAL_FETCH_K=20`, `RRF_K=30`;
+  - `precision@5=0.192857`, `recall@5=0.741071`, `MRR=0.560054`, `recall@1=0.348214`, `recall@3=0.571429`, `recall@10=0.785714`, `recall@20=0.830357`;
+  - по типам: `exact_recall@5=1.0`, `multi_recall@5=0.625`, `semantic_recall@5=0.66`.
+- Лучший вариант по `MRR`/`recall@1`:
+  - indexed text: `title + category + chunk text`;
+  - chunking: `450/80`;
+  - retrieval: `dense`;
+  - `recall@5=0.723214`, `MRR=0.662061`, `recall@1=0.455357`.
+- Выбор для основного RAG-пайплайна сделан в пользу `600/100 + title/category + hybrid_rrf`, потому что для ответа с `top_k=5` важнее максимизировать попадание релевантного документа в контекст, чем только позицию первого результата.
+- Достигнутое `recall@5=0.741071` заметно лучше исходного dense baseline `0.660714`, но всё ещё ниже целевого `0.85`; следующий практический шаг — reranker поверх hybrid candidates или более сильная query/document rewriting стратегия.
+
 **Проверки:**
 
 - `$files = Get-ChildItem -Path src -Filter '*.py' | ForEach-Object { $_.FullName }; .\.venv\Scripts\python.exe -m py_compile @files` — все Python-модули `src/*.py` компилируются.
@@ -1895,8 +1915,7 @@ Gap-поведение: ...
 
 **Ошибки и предупреждения:**
 
-- Полный прогон notebook-этапа 4 с реальной моделью `intfloat/multilingual-e5-base` не запускался в этой проверке, чтобы не повторять длительное построение embeddings; функциональная логика BM25/RRF проверена быстрым smoke-тестом без тяжёлой модели.
-- Реальные значения метрик `bm25` и `hybrid_rrf` будут зафиксированы при следующем полном запуске notebook сверху вниз или при отдельном длительном smoke на уже построенной основной Chroma collection.
+- Повторный standalone retrieval-эксперимент с реальной моделью `intfloat/multilingual-e5-base` выполнен; результаты зафиксированы выше. Полный notebook сверху вниз всё ещё нужно запустить отдельно, чтобы синхронизировать notebook-output с выбранными настройками.
 - Reranker не включён намеренно: `RERANKER_ENABLED=false`; это снижает требования к памяти и задержку до проверки, достаточно ли BM25+RRF.
 
 **Следующий шаг:**

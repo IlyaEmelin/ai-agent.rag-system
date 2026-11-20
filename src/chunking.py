@@ -83,7 +83,9 @@ def build_langchain_documents(
     Возвращает:
         Список ``langchain_core.documents.Document`` с очищенным текстом в
         ``page_content`` и обязательными metadata ``doc_id``, ``title``,
-        ``category`` и ``format``.
+        ``category`` и ``format``. Заголовок и категория остаются в metadata;
+        в индексируемый текст каждого чанка они добавляются на этапе
+        ``build_document_chunks()``.
 
     Исключения:
         ValueError: Если документ пустой после очистки или metadata не проходят
@@ -204,8 +206,38 @@ def build_document_chunks(documents: Sequence[Document], strategy: ChunkingStrat
         for chunk_index, chunk_text in enumerate(text_chunks):
             metadata = build_chunk_metadata(document.metadata, chunk_index, strategy.name)
             validate_chunk_metadata(metadata)
-            chunks.append(Document(page_content=chunk_text, metadata=metadata))
+            indexed_chunk_text = build_indexed_chunk_text(chunk_text, metadata)
+            chunks.append(Document(page_content=indexed_chunk_text, metadata=metadata))
     return chunks
+
+
+def build_indexed_chunk_text(chunk_text: str, metadata: dict[str, Any]) -> str:
+    """Добавляет поисковый контекст metadata в текст чанка.
+
+    Заголовок и категория важны для ранжирования, но сами по себе Chroma и BM25
+    ищут по ``page_content``. Поэтому эти поля дублируются в индексируемый текст
+    каждого чанка, при этом исходные значения сохраняются в metadata для
+    фильтрации, трассировки и вывода источников.
+
+    Аргументы:
+        chunk_text: Текст чанка после выбранной стратегии разбиения.
+        metadata: Metadata чанка с полями ``title`` и ``category``.
+
+    Возвращает:
+        Текст чанка с префиксом ``Название``/``Категория``/``Текст``.
+
+    Исключения:
+        ValueError: Если чанк пустой или metadata не проходят валидацию.
+    """
+
+    validate_chunk_metadata(metadata)
+    text = chunk_text.strip()
+    if not text:
+        raise ValueError(f"Чанк doc_id={metadata.get('doc_id')} пуст и не может быть проиндексирован.")
+
+    title = str(metadata["title"]).strip()
+    category = str(metadata["category"]).strip()
+    return f"Название: {title}\nКатегория: {category}\nТекст:\n{text}"
 
 
 def split_document_text(text: str, metadata: dict[str, Any], strategy: ChunkingStrategy) -> list[str]:

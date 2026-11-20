@@ -352,10 +352,10 @@ def load_settings(env_path: str | Path | None = DEFAULT_ENV_PATH, *, override: b
             collection_prefix=_get_str("CHROMA_COLLECTION_PREFIX", "filmoskop"),
         ),
         chunking=ChunkingSettings(
-            chunk_size=_get_int("CHUNK_SIZE", 900),
-            chunk_overlap=_get_int("CHUNK_OVERLAP", 150),
-            alt_chunk_size=_get_int("ALT_CHUNK_SIZE", 600),
-            alt_chunk_overlap=_get_int("ALT_CHUNK_OVERLAP", 100),
+            chunk_size=_get_int("CHUNK_SIZE", 600),
+            chunk_overlap=_get_int("CHUNK_OVERLAP", 100),
+            alt_chunk_size=_get_int("ALT_CHUNK_SIZE", 450),
+            alt_chunk_overlap=_get_int("ALT_CHUNK_OVERLAP", 80),
         ),
         retrieval=RetrievalSettings(
             top_k=_get_int("RETRIEVAL_TOP_K", 5),
@@ -363,7 +363,7 @@ def load_settings(env_path: str | Path | None = DEFAULT_ENV_PATH, *, override: b
             score_threshold=_get_float("RETRIEVAL_SCORE_THRESHOLD", 0.0),
             bm25_enabled=_get_bool("BM25_ENABLED", True),
             rrf_enabled=_get_bool("RRF_ENABLED", True),
-            rrf_k=_get_int("RRF_K", 60),
+            rrf_k=_get_int("RRF_K", 30),
         ),
         reranker=RerankerSettings(
             enabled=_get_bool("RERANKER_ENABLED", False),
