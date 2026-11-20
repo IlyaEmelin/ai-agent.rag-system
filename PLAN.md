@@ -309,7 +309,7 @@ python -c "import langchain; import chromadb; import sentence_transformers; prin
 
 ## 2.1. Подготовить LangChain Documents
 
-**Статус:** `[ ]`
+**Статус:** `[x]`
 
 ### Задачи
 
@@ -1506,3 +1506,70 @@ Gap-поведение: ...
 **Следующий шаг:**
 
 - Перейти к пункту `2.1. Подготовить LangChain Documents`: преобразовать очищенные документы в `langchain_core.documents.Document` и сохранить metadata `doc_id`, `title`, `category`, `format` для последующего Markdown-aware chunking на этапе `2.2`.
+
+### 2026-11-20 — пункт 2.1 «Подготовить LangChain Documents»
+
+**Статус:** `[x]` пункт `2.1` завершён.
+
+**Изменённые файлы:**
+
+- `PLAN.md`;
+- `src/chunking.py`;
+- `notebooks/rag_filmoskop_project.ipynb`.
+
+**Изменения окружения:**
+
+- В локальную `.venv` установлен пакет `langchain-core`, который уже был указан в `requirements.txt`, но отсутствовал в текущем окружении.
+
+**Что сделано:**
+
+- В `src/chunking.py` добавлена подготовка очищенного корпуса к LangChain:
+  - `build_langchain_documents()` преобразует `CleanedDocumentResult` или `KnowledgeDocument` в `langchain_core.documents.Document`;
+  - очищенный текст передаётся в `page_content`;
+  - metadata строятся через `build_document_metadata()` и валидируются через `validate_document_metadata()`;
+  - обязательные metadata: `doc_id`, `title`, `category`, `format`;
+  - `summarize_langchain_documents()` формирует краткую сводку по подготовленным документам.
+- В notebook добавлен блок этапа `2.1`:
+  - импорт `build_langchain_documents` и `summarize_langchain_documents`;
+  - построение `langchain_docs` из `cleaned_results`;
+  - вывод количества документов, сводки и примера metadata.
+- Количество документов после преобразования сохранено: `181` LangChain Documents.
+- Количество уникальных `doc_id` сохранено: `181`.
+- Все подготовленные документы имеют непустой `page_content` и metadata `doc_id`, `title`, `category`, `format`.
+
+**Результаты проверки подготовки документов:**
+
+- `documents`: `181`.
+- `unique_doc_ids`: `181`.
+- `min_page_content_length`: `14`.
+- `max_page_content_length`: `1861`.
+- Распределение metadata `format`: `html=21`, `markdown=28`, `text=132`. Это именно исходный `format` из датасета, сохранённый для фильтрации и трассировки; наличие Markdown-разметки в тексте отдельно анализируется аудитом очистки.
+- Распределение metadata `category`:
+  - `Аккаунт и профили`: `35`;
+  - `Ошибки воспроизведения`: `32`;
+  - `Подписка и оплата`: `38`;
+  - `Устройства и качество`: `42`;
+  - `Функции и контент`: `34`.
+
+**Проверки:**
+
+- `.\.venv\Scripts\python.exe -m pip show langchain-core` — сначала показал, что пакет не установлен в `.venv`.
+- `.\.venv\Scripts\python.exe -m pip install langchain-core` — успешно установил прямую зависимость, уже присутствующую в `requirements.txt`.
+- `$files = Get-ChildItem -Path src -Filter '*.py' | ForEach-Object { $_.FullName }; .\.venv\Scripts\python.exe -m py_compile @files` — все Python-модули компилируются.
+- Проверочный скрипт с `load_settings()`, `load_dataset()`, `clean_corpus()` и `build_langchain_documents()` — успешно построил `181` LangChain Documents, подтвердил `181` уникальный `doc_id`, обязательные metadata и непустой `page_content`.
+- Notebook JSON успешно читается после добавления блока `2.1`; количество ячеек: `23`.
+- `git --no-pager diff --check` — пробельных ошибок нет.
+- `git --no-pager status --short` — изменены только ожидаемые tracked-файлы после реализации пункта `2.1`.
+
+**Ошибки и предупреждения:**
+
+- Первая попытка обновить notebook через inline PowerShell/Python-команду завершилась `SyntaxError` из-за quoting внутри строки с `display(f"...")`; файл notebook этой командой не был записан. Повтор выполнен через временный UTF-8 Python-файл, который удалён после успешной записи.
+- Первая проверка построения документов через длинную `python -c` команду завершилась ошибкой PowerShell quoting: `The string is missing the terminator: "`. Проверка повторена через временный UTF-8 Python-файл.
+- Первичная проверка пункта `2.1` выявила отсутствующий в `.venv` пакет `langchain_core`: `ModuleNotFoundError: No module named 'langchain_core'`. Пакет установлен как уже объявленная зависимость из `requirements.txt`; сам `requirements.txt` менять не требовалось.
+- Проверка notebook с кириллическим литералом, переданным через PowerShell stdin, дала `AssertionError`; структурная проверка JSON и просмотр добавленных ячеек подтвердили корректность notebook. Для дальнейших Unicode-проверок следует использовать временные UTF-8 `.py` файлы или ASCII-инварианты.
+- Предупреждение `urllib3.contrib.socks.DependencyWarning` о необязательном PySocks по-прежнему появляется при импорте `trafilatura`; оно не блокирует пункт `2.1`.
+- `pip` сообщил о доступном обновлении `25.1.1 -> 26.3`; обновление pip не выполнялось, так как не относится к пункту `2.1`.
+
+**Следующий шаг:**
+
+- Перейти к пункту `2.2. Реализовать две стратегии чанкинга`: построить чанки из подготовленных `langchain_docs`, для Markdown-документов использовать Markdown-aware splitting, а каждому чанку добавить metadata `doc_id`, `title`, `category`, `format`, `chunk_id`, `chunk_index`, `chunking_strategy`.
