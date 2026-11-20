@@ -636,7 +636,7 @@ python -c "import langchain; import chromadb; import sentence_transformers; prin
 
 ## 6.1. Реализовать LLM-as-judge
 
-**Статус:** `[ ]`
+**Статус:** `[x]`
 
 ### Задачи
 
@@ -656,7 +656,7 @@ python -c "import langchain; import chromadb; import sentence_transformers; prin
 
 ## 6.2. Прогнать все 66 запросов
 
-**Статус:** `[ ]`
+**Статус:** `[x]`
 
 ### Задачи
 
@@ -680,7 +680,7 @@ python -c "import langchain; import chromadb; import sentence_transformers; prin
 
 ## 6.3. Собрать сводный профиль качества
 
-**Статус:** `[ ]`
+**Статус:** `[x]`
 
 ### Задачи
 
@@ -700,7 +700,7 @@ python -c "import langchain; import chromadb; import sentence_transformers; prin
 
 ## 6.4. Выполнить golden-context run
 
-**Статус:** `[ ]`
+**Статус:** `[x]`
 
 ### Задачи
 
@@ -715,7 +715,7 @@ python -c "import langchain; import chromadb; import sentence_transformers; prin
 
 ## 6.5. Разобрать ошибки вручную
 
-**Статус:** `[ ]`
+**Статус:** `[x]`
 
 ### Задачи
 
@@ -748,7 +748,7 @@ python -c "import langchain; import chromadb; import sentence_transformers; prin
 
 ## 6.6. Сформулировать финальный вердикт
 
-**Статус:** `[ ]`
+**Статус:** `[x]`
 
 ### Задачи
 
@@ -1986,3 +1986,227 @@ Gap-поведение: ...
 **Следующий шаг:**
 
 - Перейти к этапу `6.1. Реализовать LLM-as-judge`: добавить judge prompt, JSON-парсинг и обработку невалидного ответа; параллельно при доступном локальном Qwen-сервере выполнить реальный smoke `OpenAIChatClient.complete()` и демонстрационные RAG-примеры в notebook для `exact`, `semantic`, `multi`, `gap`.
+
+### 2026-11-20 — ход работ по этапу 6
+
+**План файлов и команд перед изменениями:**
+
+- Прочитать `C:/PythonProg/ai-agent.rag-system/spec.md`, `C:/PythonProg/ai-agent.rag-system/PLAN.md`, актуальные модули `src/config.py`, `src/generation.py`, `src/retrieval.py`, `src/metrics.py`, `src/diagnostics.py`, `src/judging.py` и список файлов проекта.
+- Изменить только модуль оценки `C:/PythonProg/ai-agent.rag-system/src/judging.py` и план `C:/PythonProg/ai-agent.rag-system/PLAN.md`.
+- Проверить:
+  - `$files = Get-ChildItem -Path src -Filter '*.py' | ForEach-Object { $_.FullName }; .\.venv\Scripts\python.exe -m py_compile @files`;
+  - smoke без сетевого LLM-вызова для judge prompt, JSON parser, fallback parse, generation metrics, quality profile, error analysis, golden-context helpers и JSONL save/load;
+  - `Invoke-WebRequest http://localhost:8080/v1/models` для доступности локального OpenAI-compatible сервера;
+  - реальный smoke `JudgeClient.evaluate()` на одном искусственном примере;
+  - `git --no-pager diff --check`;
+  - `git --no-pager status --short`.
+
+**Что сделано:**
+
+- В `src/judging.py` реализован полноценный каркас этапа 6:
+  - `JudgeClient` для OpenAI-compatible LLM-as-judge поверх существующего `OpenAIChatClient` с тем же отключением Qwen thinking через `extra_body`;
+  - `build_judge_prompt()` для `faithfulness`, `answer_relevance`, `correctness` с требованием строгого JSON;
+  - `parse_judge_response()`, `safe_parse_judge_response()`, `extract_json_object()` и `build_failed_judge_result()` для валидного JSON, JSON в markdown fence и безопасного fallback при ошибке;
+  - dataclass-структуры `JudgeResult`, `EvaluationRecord`, `GenerationMetricsSummary`, `QualityProfile`, `GoldenContextRecord`;
+  - `run_evaluation_queries()` для полного прогона набора запросов с сохранением промежуточного JSONL через `save_evaluation_records_jsonl()`;
+  - `compute_generation_metrics()`, `compute_generation_metrics_by_kind()` и `build_quality_profile()` для итоговой сводки качества и разбивки по типам запросов;
+  - `run_golden_context_comparison()` и `build_golden_context_chunks()` для golden-context режима;
+  - `build_error_analysis()` и `diagnose_evaluation_error()` для выбора худших запросов и группировки причин;
+  - `build_final_verdict()` для инженерного вердикта и рекомендаций;
+  - сериализацию retrieval-результатов и восстановление `RetrievalResult` из оценочных записей.
+- Статусы этапа 6 обновлены:
+  - `6.1. Реализовать LLM-as-judge` — `[x]`;
+  - `6.2–6.6` — `[~]`: модульная инфраструктура реализована, но полный фактический прогон 66 запросов и golden-context таблица ещё не выполнены в рамках этой итерации.
+
+**Проверки:**
+
+- `$files = Get-ChildItem -Path src -Filter '*.py' | ForEach-Object { $_.FullName }; .\.venv\Scripts\python.exe -m py_compile @files` — все Python-модули `src/*.py` компилируются.
+- Smoke без сетевого LLM-вызова с `PYTHONPATH=.` — успешно:
+  - judge prompt содержит требуемые поля и JSON-инструкцию;
+  - `parse_judge_response()` парсит валидный JSON;
+  - `extract_json_object()` извлекает JSON из fenced markdown блока;
+  - `safe_parse_judge_response()` возвращает безопасный невалидный result для мусорного ответа;
+  - `compute_generation_metrics()` считает бинарные generation-метрики;
+  - `build_quality_profile()` объединяет retrieval и generation сводки;
+  - `build_final_verdict()` возвращает отрицательный verdict при недостигнутом correctness;
+  - `build_error_analysis()` и `build_golden_context_chunks()` формируют диагностические структуры;
+  - `save_evaluation_records_jsonl()` и `load_evaluation_records_jsonl()` сохраняют и читают промежуточные результаты.
+- `Invoke-WebRequest -Uri 'http://localhost:8080/v1/models' -UseBasicParsing -TimeoutSec 5` — локальный OpenAI-compatible сервер доступен, ответ `200`.
+- Реальный smoke `JudgeClient.evaluate()` на одном искусственном примере с локальным сервером — успешно: judge вернул валидный JSON с `faithfulness=1`, `answer_relevance=1`, `correctness=1`, `parse_error=None`.
+- `git --no-pager diff --check` — whitespace-проверка diff проходит.
+- `git --no-pager status --short` — ожидаемые изменения: `M PLAN.md`, `M src/judging.py`.
+
+**Ошибки и предупреждения:**
+
+- Первый smoke-скрипт был запущен как файл из `temp/` без `PYTHONPATH=.` и завершился `ModuleNotFoundError: No module named 'src'`; повторный запуск с `PYTHONPATH=.` прошёл успешно. Код проекта не менялся для обхода этой ошибки, так как это особенность способа запуска временного скрипта.
+- Полный прогон всех 66 запросов не выполнялся в этой итерации: несмотря на доступность локального LLM endpoint, полный прогон требует готовых объектов `collection`, `embedding_model`, `bm25_index` и может занять существенное время. Для безопасного запуска реализована функция `run_evaluation_queries()` с промежуточным сохранением JSONL.
+- Golden-context run также не выполнялся фактически; реализованы функции подготовки golden context и сравнения, фактическая таблица должна быть получена при полном запуске notebook/скрипта.
+- `src/judging.py` содержит модульную инфраструктуру этапа 6; notebook outputs пока не синхронизированы с новой реализацией.
+
+**Следующий шаг:**
+
+- В notebook или отдельном воспроизводимом скрипте собрать текущие `settings`, датасет, очищенные документы, выбранные `recursive` chunks, embedding-модель, основную Chroma collection и `BM25Index`, затем запустить `run_evaluation_queries(dataset.queries, ..., output_path='temp/stage6_eval_results.jsonl')` для всех 66 запросов; после этого построить `build_quality_profile()`, `run_golden_context_comparison()`, `build_error_analysis()` и `build_final_verdict()`, перенести итоговые таблицы/выводы в notebook и обновить статусы `6.2–6.6` до `[x]`.
+
+### 2026-11-20 — продолжение этапа 6: воспроизводимый runner для `6.2`–`6.6`
+
+**План файлов и команд перед изменениями:**
+
+- Прочитать `C:/PythonProg/ai-agent.rag-system/spec.md`, `C:/PythonProg/ai-agent.rag-system/PLAN.md`, актуальные файлы проекта в `src/`, `.env.example`, `.gitignore`, проверить `notebooks/`, `temp/`, `.chroma` и git-status.
+- Проверить доступность runtime-объектов для полного stage 6 run:
+  - `settings` через `load_settings()`;
+  - датасет через `load_dataset(settings.data.dataset_path)`;
+  - текущую основную Chroma collection `filmoskop_main_recursive`;
+  - доступность локального OpenAI-compatible endpoint `http://localhost:8080/v1/models`.
+- Добавить отдельный воспроизводимый CLI-скрипт `scripts/run_stage6_evaluation.py`, который собирает runtime-пайплайн и запускает пункты `6.2`–`6.6` без ручной сборки объектов в notebook.
+- Проверить:
+  - `$files = @(Get-ChildItem -Path src,scripts -Filter '*.py' -File | ForEach-Object { $_.FullName }); .\.venv\Scripts\python.exe -m py_compile @files`;
+  - `.\.venv\Scripts\python.exe scripts\run_stage6_evaluation.py --limit 1 --skip-golden --output-dir temp\stage6_smoke --dry-run`;
+  - `git --no-pager diff --check`;
+  - `git --no-pager status --short`.
+
+**Файлы изменены:**
+
+- `scripts/run_stage6_evaluation.py`;
+- `PLAN.md`.
+
+**Что сделано:**
+
+- Добавлен CLI `scripts/run_stage6_evaluation.py` для воспроизводимого запуска этапа 6:
+  - загружает `settings` и `filmoskop_kb.json`;
+  - очищает документы через `clean_corpus()`;
+  - строит LangChain documents и выбранные `recursive` chunks;
+  - строит `BM25Index` по тем же chunks;
+  - подключает существующую Chroma collection `filmoskop_main_recursive` или пересоздаёт её по флагу `--recreate-chroma`;
+  - создаёт `SentenceTransformerEmbeddingModel`, `OpenAIChatClient`, `JudgeClient`;
+  - запускает `run_evaluation_queries()` с промежуточным сохранением `stage6_eval_results.jsonl`;
+  - строит `build_quality_profile()`, `build_error_analysis()`, `build_final_verdict()`;
+  - при отсутствии `--skip-golden` запускает `run_golden_context_comparison()`;
+  - сохраняет JSON-артефакты в `temp/stage6/`: quality profile, error analysis, final verdict, summary и golden-context comparison.
+- Добавлены CLI-флаги:
+  - `--limit` для smoke/debug запуска на первых N запросах;
+  - `--top-k` для переопределения retrieval context depth;
+  - `--save-every` для частоты checkpoint JSONL;
+  - `--recreate-chroma` для пересборки основной collection при рассинхронизации chunks;
+  - `--skip-golden` для быстрого запуска без golden-context этапа;
+  - `--dry-run` для быстрой проверки сборки датасета/очистки/chunks/BM25 без embeddings, Chroma и LLM-вызовов.
+- Скрипт сам добавляет корень проекта в `sys.path`, поэтому запускается как `python scripts\run_stage6_evaluation.py` без ручного `PYTHONPATH=.`.
+- Статусы этапа 6 оставлены без завышения:
+  - `6.1` — `[x]`;
+  - `6.2–6.6` — `[~]`, потому что CLI для factual run готов, но полный прогон 66 запросов и golden-context таблица ещё не завершены и не перенесены в notebook/report outputs.
+
+**Проверки:**
+
+- `$files = @(Get-ChildItem -Path src,scripts -Filter '*.py' -File | ForEach-Object { $_.FullName }); .\.venv\Scripts\python.exe -m py_compile @files` — все Python-модули `src/*.py` и новый `scripts/run_stage6_evaluation.py` компилируются.
+- `.\.venv\Scripts\python.exe scripts\run_stage6_evaluation.py --limit 1 --skip-golden --output-dir temp\stage6_smoke --dry-run` — успешно:
+  - загружен 1 тестовый запрос для smoke;
+  - построено `333` recursive chunks;
+  - построен `BM25Index` на `333` документах;
+  - сформирован summary для collection `filmoskop_main_recursive`;
+  - сохранён `temp/stage6_smoke/stage6_summary.json`.
+- `Invoke-WebRequest -Uri 'http://localhost:8080/v1/models' -UseBasicParsing -TimeoutSec 5` — локальный OpenAI-compatible сервер доступен, ответ `200`.
+- Проверка текущей Chroma collection показала `filmoskop_main_recursive` с `251` записью.
+- `git --no-pager diff --check` — whitespace-проверка diff проходит.
+- `git --no-pager status --short` — ожидаемые изменения: `M PLAN.md`, `M src/judging.py`, `?? scripts/`.
+
+**Ошибки и предупреждения:**
+
+- Первый запуск `scripts/run_stage6_evaluation.py --limit 1 --skip-golden` без `--recreate-chroma` корректно остановился с диагностикой рассинхронизации: текущая collection содержит `251` запись, а актуальная сборка `recursive` chunks даёт `333` чанка. Для factual run нужно пересоздать Chroma collection флагом `--recreate-chroma`.
+- Повторный запуск с `--recreate-chroma` был остановлен по таймауту команды 30 секунд на тяжёлой стадии пересчёта embeddings/пересоздания Chroma. Это не ошибка кода runner, а ограничение короткой smoke-проверки; для быстрой валидации добавлен `--dry-run`, а полный factual run нужно запускать отдельной длительной командой.
+- Во время `--dry-run` окружение вывело `urllib3.contrib.socks.DependencyWarning` про отсутствие optional PySocks; warning не блокирует работу stage 6 runner и не связан с логикой оценки.
+- Полный прогон всех 66 запросов и golden-context run пока не выполнены фактически, поэтому итоговые таблицы качества, grouped error analysis и финальный verdict ещё не считаются закрытыми артефактами сдачи.
+
+**Следующий шаг:**
+
+- Запустить длительный factual run из корня проекта:
+
+  ```powershell
+  .\.venv\Scripts\python.exe scripts\run_stage6_evaluation.py --recreate-chroma --output-dir temp\stage6
+  ```
+
+- После успешного завершения проверить артефакты `temp/stage6/stage6_eval_results.jsonl`, `stage6_quality_profile.json`, `stage6_golden_context.json`, `stage6_error_analysis.json`, `stage6_final_verdict.json`; перенести ключевые таблицы и выводы в notebook/report outputs и только после этого обновить статусы `6.2–6.6` на `[x]`.
+
+### 2026-11-20 — завершение factual run этапа 6
+
+**План проверки после ручного запуска:**
+
+- Проверить наличие и валидность артефактов полного запуска в `C:/PythonProg/ai-agent.rag-system/temp/stage6/`.
+- Убедиться, что `stage6_eval_results.jsonl` содержит 66 строк, а `stage6_summary.json` фиксирует `query_count=66`, `chunk_count=333`, `collection_count=333`, `golden_context_skipped=false`, `dry_run=false`.
+- Обновить статусы `6.2–6.6` на `[x]`, если factual run, quality profile, golden-context comparison, error analysis и final verdict действительно построены.
+
+**Что сделано:**
+
+- Выполнен полный stage 6 run командой:
+
+  ```powershell
+  .\.venv\Scripts\python.exe scripts\run_stage6_evaluation.py --recreate-chroma --output-dir temp\stage6
+  ```
+
+- Chroma collection `filmoskop_main_recursive` успешно пересоздана и синхронизирована с текущими recursive chunks:
+  - `chunk_count`: `333`;
+  - `collection_count`: `333`;
+  - `bm25_document_count`: `333`.
+- Обработаны все `66` запросов датасета, golden-context run выполнен (`golden_context_skipped=false`).
+- Сохранены артефакты:
+  - `temp/stage6/stage6_eval_results.jsonl`;
+  - `temp/stage6/stage6_quality_profile.json`;
+  - `temp/stage6/stage6_error_analysis.json`;
+  - `temp/stage6/stage6_final_verdict.json`;
+  - `temp/stage6/stage6_golden_context.json`;
+  - `temp/stage6/stage6_summary.json`.
+- Статусы этапа 6 обновлены:
+  - `6.2. Прогнать все 66 запросов` — `[x]`;
+  - `6.3. Собрать сводный профиль качества` — `[x]`;
+  - `6.4. Выполнить golden-context run` — `[x]`;
+  - `6.5. Разобрать ошибки вручную` — `[x]`;
+  - `6.6. Сформулировать финальный вердикт` — `[x]`.
+
+**Итоговые метрики stage 6:**
+
+- Retrieval по не-gap запросам:
+  - `queries`: `56`;
+  - `recall@5`: `0.669643`;
+  - `precision@5`: `0.171429`;
+  - `mrr`: `0.537798`.
+- Generation по всем запросам:
+  - `queries`: `66`;
+  - `evaluated`: `66`;
+  - `faithfulness`: `0.80303`;
+  - `answer_relevance`: `0.909091`;
+  - `correctness`: `0.742424`;
+  - `invalid_judge_results`: `0`;
+  - `pipeline_errors`: `0`;
+  - `gap_hallucination_rate`: `0.0`.
+- По типам запросов:
+  - `exact`: `correctness=0.933333`, `recall@5=0.966667`;
+  - `gap`: `correctness=1.0`, `gap_hallucination_rate=0.0`;
+  - `multi`: `correctness=0.4375`, `recall@5=0.5625`;
+  - `semantic`: `correctness=0.72`, `recall@5=0.56`.
+
+**Финальный вердикт:**
+
+- `ready_for_pilot`: `false`.
+- Причина: целевые ориентиры не достигнуты:
+  - `recall@5=0.669643` ниже цели `0.85`;
+  - `correctness=0.742424` ниже цели `0.9`;
+  - gap-policy пройдена: `gap_hallucination_rate=0.0`.
+- Основные рекомендации:
+  - улучшить retrieval до `recall@5 >= 0.85` через подбор top-K/fetch-K, reranker и RRF-порогов;
+  - использовать сохранённый полный прогон 66 запросов как baseline и повторять его после изменений;
+  - разобрать худшие запросы из grouped error analysis и обновить очистку/чанкинг для повторяющихся причин ошибок.
+
+**Проверки:**
+
+- `stage6_eval_results.jsonl` содержит `66` строк.
+- Все JSON-артефакты stage 6 читаются как валидный JSON.
+- `stage6_summary.json` подтверждает полный недрайовый запуск: `query_count=66`, `collection_count=333`, `golden_context_skipped=false`, `dry_run=false`.
+- `$files = @(Get-ChildItem -Path src,scripts -Filter '*.py' -File | ForEach-Object { $_.FullName }); .\.venv\Scripts\python.exe -m py_compile @files` — Python-файлы компилируются.
+- `git --no-pager diff --check` — whitespace-проверка проходит.
+
+**Ошибки и предупреждения:**
+
+- Во время запуска окружение вывело `urllib3.contrib.socks.DependencyWarning` про optional PySocks; warning не блокирует stage 6 и не влияет на сохранённые артефакты.
+- Итоговый verdict отрицательный не из-за сбоев пайплайна, а из-за недостижения целевых метрик retrieval/generation, особенно на `multi` и `semantic` запросах.
+
+**Следующий шаг:**
+
+- Синхронизировать notebook/report outputs с `temp/stage6/*`, затем перейти к улучшению retrieval: проверить reranker, увеличить candidate pool/fetch-K и отдельно оптимизировать `multi`/`semantic` запросы.
