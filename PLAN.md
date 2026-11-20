@@ -359,7 +359,7 @@ python -c "import langchain; import chromadb; import sentence_transformers; prin
 
 ## 2.3. Построить embeddings
 
-**Статус:** `[ ]`
+**Статус:** `[x]`
 
 ### Задачи
 
@@ -376,7 +376,7 @@ python -c "import langchain; import chromadb; import sentence_transformers; prin
 
 ## 2.4. Сравнить стратегии чанкинга
 
-**Статус:** `[ ]`
+**Статус:** `[x]`
 
 ### Задачи
 
@@ -1651,3 +1651,135 @@ Gap-поведение: ...
 **Следующий шаг:**
 
 - Перейти к пункту `2.3. Построить embeddings`: реализовать wrapper для embedding-модели `intfloat/multilingual-e5-base`, проверить загрузку модели на локальной машине и подготовить embeddings для сравнения стратегий чанкинга.
+
+### 2026-11-20 — пункт 2.3 «Построить embeddings»
+
+**Статус:** `[x]` завершено.
+
+**Изменённые файлы:**
+
+- `PLAN.md`;
+- `src/embeddings.py`;
+- `notebooks/rag_filmoskop_project.ipynb`.
+
+**Что сделано:**
+
+- В `src/embeddings.py` реализован wrapper `SentenceTransformerEmbeddingModel` для embedding-модели из `sentence-transformers`.
+- Добавлена фабрика `build_embedding_model(settings.embedding)`.
+- Настройки берутся из сгруппированного блока `settings.embedding`:
+  - `EMBEDDING_MODEL_NAME=intfloat/multilingual-e5-base`;
+  - `EMBEDDING_DEVICE=auto`;
+  - `EMBEDDING_BATCH_SIZE=32`;
+  - `NORMALIZE_EMBEDDINGS=true`.
+- Для E5-подобных моделей добавлены стабильные префиксы:
+  - `passage: ` для документов и чанков;
+  - `query: ` для пользовательских вопросов.
+- Добавлены методы:
+  - `embed_documents()` для embeddings чанков LangChain `Document`;
+  - `embed_query()` для embedding пользовательского вопроса;
+  - `embed_texts()` для произвольных текстов.
+- Добавлена валидация настроек через `validate_embedding_settings()`.
+- Добавлен выбор устройства через `resolve_embedding_device()`: при `auto` выбирается `cuda`, если доступна CUDA, иначе `cpu`; если `torch` не установлен, безопасно возвращается `cpu`.
+- Добавлена сводка embeddings через `summarize_embeddings()` с количеством векторов, размерностью и L2-нормами.
+- Импорт `sentence_transformers` сделан ленивым: модуль проекта импортируется без установленной модели, а понятная ошибка появляется только при фактической загрузке embedding-модели.
+- Определение размерности модели обновлено на актуальный метод `get_embedding_dimension()` с fallback на устаревший `get_sentence_embedding_dimension()` для совместимости.
+- В notebook добавлен раздел `2.3. Embeddings`:
+  - импорт wrapper;
+  - загрузка embedding-модели из `settings.embedding`;
+  - построение sample embeddings для чанков обеих стратегий;
+  - вывод сводки по embeddings и параметров нормализации.
+- После установки зависимостей в текущую `.venv` подтверждена фактическая загрузка `intfloat/multilingual-e5-base` и построение embeddings для sample чанков обеих стратегий чанкинга.
+
+**Проверки:**
+
+- `.\.venv\Scripts\python.exe -c "import sentence_transformers; print(sentence_transformers.__version__)"` — выявлено отсутствие пакета `sentence_transformers` в текущей `.venv`.
+- `$files = Get-ChildItem -Path src -Filter '*.py' | ForEach-Object { $_.FullName }; .\.venv\Scripts\python.exe -m py_compile @files` — все Python-модули `src/*.py` компилируются.
+- `.\.venv\Scripts\python.exe -m pip show sentence-transformers transformers torch numpy` — подтвердил отсутствие пакетов `sentence-transformers`, `transformers`, `torch`, `numpy` в текущей `.venv`.
+- `.\.venv\Scripts\python.exe -c "from src.config import load_settings; from src.embeddings import prepare_embedding_texts, resolve_embedding_device, validate_embedding_settings; ..."` — настройки embeddings читаются из `.env`, проходят валидацию, `EMBEDDING_DEVICE=auto` разрешается в `cpu`, E5-префикс `passage: ` добавляется корректно.
+- `.\.venv\Scripts\python.exe -c "from src.config import load_settings; from src.embeddings import build_embedding_model; s=load_settings(); build_embedding_model(s.embedding)"` — проверена понятная ошибка окружения при загрузке модели: `ImportError: Пакет sentence-transformers не установлен в текущем окружении. Установите зависимости командой: pip install -r requirements.txt`.
+- `.\.venv\Scripts\python.exe -c "import json; from pathlib import Path; nb=json.loads(Path('notebooks/rag_filmoskop_project.ipynb').read_text(encoding='utf-8')); ..."` — notebook остаётся валидным JSON, блок `2.3` найден, количество ячеек: `29`.
+- `.\.venv\Scripts\python.exe -m pip install -r requirements.txt` — попытка установить зависимости была прервана таймаутом инструмента через 30 секунд; после таймаута пакеты `sentence-transformers`, `transformers`, `torch`, `numpy` всё ещё не обнаруживаются в `.venv`.
+- `.\.venv\Scripts\python.exe -m pip show sentence-transformers transformers torch numpy` — после ручной установки подтверждены пакеты: `sentence-transformers==5.6.0`, `transformers==4.57.6`, `torch==2.5.1+cu121`, `numpy==2.1.3`.
+- `.\.venv\Scripts\python.exe -c "from src.config import load_settings; from src.embeddings import build_embedding_model, summarize_embeddings; ..."` — модель `intfloat/multilingual-e5-base` успешно загружена на `cuda`, размерность `768`, нормализация включена, embeddings коротких текстов и query имеют L2-норму `1.0`.
+- `.\.venv\Scripts\python.exe -c "from src.config import load_settings; from src.data_loading import load_dataset; from src.cleaning import clean_corpus; from src.chunking import ...; from src.embeddings import ..."` — на реальном корпусе построены чанки и sample embeddings для обеих стратегий:
+  - `recursive`: `251` чанк по `181` документу; sample embeddings `4 x 768`; нормы `1.0`;
+  - `markdown_aware`: `337` чанков по `181` документу; sample embeddings `4 x 768`; нормы `1.0`;
+  - query embedding для первого тестового запроса: размерность `768`, норма `1.0`.
+- `$files = Get-ChildItem -Path src -Filter '*.py' | ForEach-Object { $_.FullName }; .\.venv\Scripts\python.exe -m py_compile @files` — все Python-модули `src/*.py` компилируются после финальных изменений.
+- `git --no-pager diff --check` — whitespace-проверка diff проходит.
+
+**Ошибки и предупреждения:**
+
+- Блокер с отсутствующими зависимостями снят после ручной установки пакетов в текущую `.venv`.
+- Fallback-модель не выбиралась: основная модель `intfloat/multilingual-e5-base` успешно загружается и строит embeddings на локальной машине.
+- При первом автоматическом обновлении notebook русские markdown-строки раздела `2.3` были записаны с mojibake из-за передачи скрипта через PowerShell; строки исправлены повторной записью notebook в UTF-8.
+- При smoke test на реальном корпусе остаётся предупреждение `urllib3.contrib.socks.DependencyWarning` о необязательном PySocks при импорте `trafilatura`; оно не связано с embedding-моделью и не блокирует пункт `2.3`.
+
+**Следующий шаг:**
+
+- Перейти к пункту `2.4. Сравнить стратегии чанкинга`: создать временные Chroma collections для каждой стратегии, выполнить dense retrieval baseline и выбрать стратегию на основании retrieval-метрик и ручного просмотра примеров.
+
+### 2026-11-20 — пункт 2.4 «Сравнить стратегии чанкинга»
+
+**Статус:** `[x]` пункт `2.4` завершён.
+
+**Изменённые файлы:**
+
+- `PLAN.md`;
+- `src/vector_store.py`;
+- `src/retrieval.py`;
+- `src/metrics.py`;
+- `notebooks/rag_filmoskop_project.ipynb`.
+
+**Что сделано:**
+
+- В `src/vector_store.py` добавлена минимальная инфраструктура временных Chroma collections для сравнения стратегий:
+  - построение имени collection через `build_collection_name()`;
+  - создание persistent Chroma client;
+  - пересоздание collection через `recreate_chroma_collection()`;
+  - добавление чанков с заранее построенными embeddings;
+  - сводка collection через `describe_chroma_collection()`;
+  - безопасная очистка временной Chroma-директории через `remove_chroma_persist_dir()`.
+- В `src/retrieval.py` добавлен dense retrieval baseline:
+  - `RetrievedChunk`;
+  - `RetrievalResult`;
+  - `dense_retrieve()`;
+  - `evaluate_dense_retrieval()`.
+- В `src/metrics.py` добавлены retrieval-метрики:
+  - `precision@K`;
+  - `recall@K`;
+  - `MRR`;
+  - recall-кривая для `K in {1, 3, 5, 10, 20}`;
+  - поиск слабых примеров с `recall@5 = 0`.
+- В notebook добавлен раздел `2.4. Сравнение стратегий чанкинга`:
+  - строит полные embeddings всех чанков для обеих стратегий;
+  - создаёт временные Chroma collections в отдельной директории `tmp_chunking_compare`;
+  - выполняет dense retrieval baseline;
+  - выводит таблицу метрик и слабые примеры для ручной проверки.
+- Проведено сравнение на реальном корпусе и 56 не-`gap` тестовых запросах:
+  - `recursive`: `251` чанк, `precision@5=0.171429`, `recall@5=0.660714`, `MRR=0.501680`, recall-кривая `{1: 0.267857, 3: 0.553571, 5: 0.660714, 10: 0.848214, 20: 0.910714}`;
+  - `markdown_aware`: `337` чанков, `precision@5=0.160714`, `recall@5=0.625000`, `MRR=0.516368`, recall-кривая `{1: 0.294643, 3: 0.562500, 5: 0.625000, 10: 0.839286, 20: 0.910714}`.
+- Выбрана стратегия `recursive`, потому что она показывает лучший `recall@5`, который является главным ориентиром для выбора чанкинга на baseline-этапе. У `markdown_aware` немного выше `MRR`, но ниже `recall@5`, поэтому она не выбрана как основная стратегия.
+- Зафиксированы слабые примеры для ручной диагностики:
+  - для `recursive`: «сколько загрузок можно хранить на одном устройстве», «как сделать, чтобы деньги сами не снимались каждый месяц», «ребёнок сидит в моём аккаунте — как скрыть от него взрослые фильмы»;
+  - для `markdown_aware`: «вечером фильмы постоянно тормозят и крутится кружок загрузки, что делать», «как сделать, чтобы деньги сами не снимались каждый месяц», «ребёнок сидит в моём аккаунте — как скрыть от него взрослые фильмы».
+
+**Проверки:**
+
+- `$files = Get-ChildItem -Path src -Filter '*.py' | ForEach-Object { $_.FullName }; .\.venv\Scripts\python.exe -m py_compile @files` — все Python-модули `src/*.py` компилируются.
+- `.\.venv\Scripts\python.exe -c "import json; from pathlib import Path; nb=json.loads(Path('notebooks/rag_filmoskop_project.ipynb').read_text(encoding='utf-8')); assert any('### 2.4. Сравнение стратегий чанкинга' in ''.join(c.get('source', [])) for c in nb['cells']); print('NOTEBOOK_JSON_OK', len(nb['cells']))"` — notebook остаётся валидным JSON, раздел `2.4` найден, количество ячеек: `32`.
+- Smoke-скрипт пункта `2.4` с `load_settings()`, `load_dataset()`, `clean_corpus()`, `build_langchain_documents()`, двумя стратегиями чанкинга, `build_embedding_model()`, временными Chroma collections, dense retrieval baseline и `compute_retrieval_metrics()` — успешно завершён; результаты метрик приведены выше.
+- `git --no-pager diff --check` — whitespace-проверка diff проходит.
+- `git --no-pager status --short` — изменены ожидаемые tracked-файлы текущего этапа и ранее изменённые файлы `PLAN.md`, `notebooks/rag_filmoskop_project.ipynb`, `src/embeddings.py`, `src/metrics.py`, `src/retrieval.py`, `src/vector_store.py`.
+
+**Ошибки и предупреждения:**
+
+- Две первичные инспекционные команды с heredoc-синтаксисом `python - <<'PY'` завершились ошибкой PowerShell: оператор `<` зарезервирован и не работает как bash heredoc. Повторные проверки выполнены через временные UTF-8 `.py` файлы.
+- Первый smoke-скрипт пункта `2.4` успешно построил метрики, но завершился `PermissionError: [WinError 32]` при удалении временной Chroma-директории: Windows удерживал файл segment-хранилища Chroma. `remove_chroma_persist_dir()` обновлён на безопасное удаление с `ignore_errors=True`, повторный smoke прошёл успешно.
+- При smoke test по-прежнему появляется не блокирующее предупреждение `urllib3.contrib.socks.DependencyWarning` о необязательном PySocks при импорте `trafilatura`.
+- В ходе проверки notebook выявлено, что раздел `2.4` сначала ссылался на `embeddings_by_strategy`, хотя в разделе `2.3` сохранялись только sample embeddings. Ячейка `2.4` исправлена: теперь она строит полные embeddings всех чанков перед созданием Chroma collections.
+- Baseline `recall@5` пока ниже целевого итогового ориентира `0.85`; это ожидаемо для dense baseline и будет адресовано на этапах улучшения retrieval.
+
+**Следующий шаг:**
+
+- Перейти к пункту `3.1. Настроить Chroma`: оформить создание основной Chroma collection в `src/vector_store.py` с настройками `CHROMA_PERSIST_DIR` и `CHROMA_COLLECTION_PREFIX`, обеспечить воспроизводимое пересоздание collection и сохранение metadata без дублей.
