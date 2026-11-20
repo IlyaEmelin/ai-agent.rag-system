@@ -254,7 +254,7 @@ python -c "import langchain; import chromadb; import sentence_transformers; prin
 
 ## 1.3. Очистка и нормализация
 
-**Статус:** `[~]`
+**Статус:** `[x]`
 
 ### Корректировка подхода от 2026-11-20
 
@@ -1443,3 +1443,66 @@ Gap-поведение: ...
 **Следующий шаг:**
 
 - Обновить зависимости и переписать `src/cleaning.py`/отчёт notebook под новый подход пункта `1.3`, затем повторно прогнать аудит качества корпуса.
+
+### 2026-11-20 — выполнение корректировки пункта 1.3 «Очистка и нормализация»
+
+**Статус:** `[x]` пункт `1.3` завершён по обновлённому библиотечному подходу.
+
+**Изменённые файлы:**
+
+- `PLAN.md`;
+- `requirements.txt`;
+- `src/cleaning.py`;
+- `notebooks/rag_filmoskop_project.ipynb`.
+
+**Что сделано:**
+
+- В `requirements.txt` добавлены прямые зависимости:
+  - `trafilatura` для HTML content extraction;
+  - `ftfy` для исправления mojibake в уже декодированных JSON-строках.
+- Подтверждено, что `beautifulsoup4` и `lxml` используются как fallback-стек для HTML.
+- `src/cleaning.py` переписан под новый подход:
+  - удалён самописный `HTMLParser` как основной путь очистки;
+  - основной HTML extractor — `trafilatura`;
+  - fallback — `BeautifulSoup` + `lxml` с удалением `script`, `style`, `nav`, `header`, `footer`, `aside`, `form`, `iframe` и DOM-блоков с boilerplate-признаками;
+  - для fallback приоритетно извлекается `article`, `main`, `[role='main']` и распространённые content-контейнеры;
+  - Markdown больше не очищается в plain text: структура сохраняется, документы помечаются операцией `markdown_marked_for_chunking` для этапа `2.2`;
+  - mojibake исправляется через `ftfy` только при уменьшении mojibake-маркеров, неуменьшении кириллицы и улучшении диагностического score;
+  - финальная regex-нормализация ограничена Unicode/whitespace/control/dehyphenation-обработкой и диагностическими эвристиками.
+- Обновлены markdown-ячейки `notebooks/rag_filmoskop_project.ipynb` для пункта `1.3`: описание теперь отражает `trafilatura`, fallback `BeautifulSoup` + `lxml`, `ftfy` и сохранение Markdown для Markdown-aware chunking.
+- Повторно прогнан аудит очистки корпуса без удаления документов.
+
+**Фактические результаты повторного аудита:**
+
+- Количество документов сохранено: `181 → 181`.
+- `html_documents`: `21 → 0`.
+- `markdown_documents`: `29 → 30`; это ожидаемо, потому что Markdown сохраняется как полезная структура и дальше должен обрабатываться Markdown-aware chunking.
+- `mojibake_documents`: `17 → 1`.
+- `suspicious_documents`: `1 → 1`.
+- `duplicate_groups`: `6 → 7`.
+- `median_raw_length`: `664 → 574`.
+- `max_raw_length`: `3057 → 1861`.
+- Операции по документам: `unchanged=110`, `whitespace_normalized=35`, `markdown_marked_for_chunking=30`, `html_cleaned=21`, `html_trafilatura=20`, `mojibake_fixed=16`, `html_bs4_fallback=1`.
+
+**Проверки:**
+
+- `.\.venv\Scripts\python.exe -m pip install trafilatura ftfy beautifulsoup4 lxml` — зависимости установлены в локальное `.venv`.
+- `.\.venv\Scripts\python.exe -c "import trafilatura, ftfy, bs4, lxml; print('deps ok')"` — импорт зависимостей успешен.
+- `$files = Get-ChildItem -Path src -Filter '*.py' | ForEach-Object { $_.FullName }; .\.venv\Scripts\python.exe -m py_compile @files` — все Python-модули `src/*.py` компилируются.
+- `.\.venv\Scripts\python.exe temp/_audit_cleaning.py` с `PYTHONPATH` на корень проекта — очистка 181 документа, повторный аудит, таблица операций и таблица примеров успешно строятся.
+- `.\.venv\Scripts\python.exe -c "import json; from pathlib import Path; nb=json.loads(Path('notebooks/rag_filmoskop_project.ipynb').read_text(encoding='utf-8')); print('NOTEBOOK_JSON_OK'); print('CELLS=' + str(len(nb['cells'])))"` — notebook остаётся валидным JSON, количество ячеек `20`.
+
+**Ошибки и блокеры:**
+
+- Блокеров нет.
+- `trafilatura` транзитивно установила `charset_normalizer`, но `charset-normalizer` не добавлялся как прямая MVP-зависимость и не используется как отдельный этап определения кодировок, потому что входом остаются уже декодированные JSON-строки.
+- При проверке зависимостей первая команда `import trafilatura, ftfy, bs4, lxml` была запущена параллельно с `pip install` и поэтому временно упала с `ModuleNotFoundError`; повтор после завершения установки успешен.
+- Команда `.\.venv\Scripts\python.exe -m py_compile src/*.py` на Windows не раскрыла wildcard и завершилась `[Errno 22] Invalid argument`; проверка повторена корректно через PowerShell-список файлов.
+- При промежуточной записи `src/cleaning.py` и markdown-ячеек notebook через PowerShell here-string кириллица была заменена на `?`; повреждение выявлено через `unicode_escape` и исправлено Unicode-safe патчами/записью. Финальные проверки подтверждают валидность файлов.
+- Предупреждение `urllib3.contrib.socks.DependencyWarning` о необязательном PySocks появляется при импорте `trafilatura`; оно не блокирует очистку корпуса и не требует действия, так как SOCKS-прокси не используется.
+- Один документ с символом `�` остаётся в `mojibake_documents`/`suspicious_documents`: replacement character означает потерю исходных байтов, поэтому автоматическое восстановление не выполняется.
+- У очищенного корпуса стало `7` групп дублей вместо `6`; автоматическое удаление дублей не выполнялось, решение нужно принимать после оценки влияния на retrieval.
+
+**Следующий шаг:**
+
+- Перейти к пункту `2.1. Подготовить LangChain Documents`: преобразовать очищенные документы в `langchain_core.documents.Document` и сохранить metadata `doc_id`, `title`, `category`, `format` для последующего Markdown-aware chunking на этапе `2.2`.

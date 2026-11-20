@@ -7,8 +7,11 @@ import re
 import unicodedata
 from dataclasses import dataclass
 from difflib import SequenceMatcher
-from html.parser import HTMLParser
 from typing import Sequence
+
+import trafilatura
+from bs4 import BeautifulSoup
+from ftfy import fix_text
 
 from src.data_loading import KnowledgeDocument
 
@@ -24,7 +27,7 @@ MARKDOWN_PATTERNS = (
     re.compile(r"`{1,3}[^`\n]+`{1,3}"),
     re.compile(r"(?m)^\s*\|.+\|\s*$"),
 )
-MOJIBAKE_MARKERS = ("�", "Ã", "Â", "Ð", "Ñ", "â€", "â€™", "â€œ", "â€\u009d", "â€“", "â€”")
+MOJIBAKE_MARKERS = ('�', 'Ã', 'Â', 'Ð', 'Ñ', 'â€', 'â€™', 'â€œ', 'â€\\u009d', 'â€“', 'â€”')
 SUSPICIOUS_SEQUENCE_PATTERNS = (
     re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]"),
     re.compile(r"[\ufffd]"),
@@ -32,82 +35,61 @@ SUSPICIOUS_SEQUENCE_PATTERNS = (
     re.compile(r"[-_=*#]{6,}"),
     re.compile(r"\s{5,}"),
 )
-BLOCK_HTML_TAGS = frozenset(
-    {
-        "address",
-        "article",
-        "aside",
-        "blockquote",
-        "br",
-        "dd",
-        "div",
-        "dl",
-        "dt",
-        "figcaption",
-        "figure",
-        "footer",
-        "h1",
-        "h2",
-        "h3",
-        "h4",
-        "h5",
-        "h6",
-        "header",
-        "hr",
-        "li",
-        "main",
-        "nav",
-        "ol",
-        "p",
-        "pre",
-        "section",
-        "table",
-        "td",
-        "th",
-        "tr",
-        "ul",
-    }
+CONTROL_CHAR_PATTERN = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
+HYPHENATED_LINE_BREAK_PATTERN = re.compile(r"(?<=[A-Za-zА-Яа-яЁё])[-‐‑‒–—]\n(?=[A-Za-zА-Яа-яЁё])")
+BOILERPLATE_TAGS = (
+    "script",
+    "style",
+    "noscript",
+    "template",
+    "nav",
+    "header",
+    "footer",
+    "aside",
+    "form",
+    "iframe",
+    "svg",
+    "canvas",
 )
-MARKDOWN_LINK_PATTERN = re.compile(r"!?\[([^\]\n]*)\]\(([^\)\n]+)\)")
-MARKDOWN_HEADING_PATTERN = re.compile(r"(?m)^\s{0,3}#{1,6}\s+")
-MARKDOWN_LIST_PATTERN = re.compile(r"(?m)^\s*(?:[-*+]\s+|\d+[.)]\s+)")
-MARKDOWN_BLOCKQUOTE_PATTERN = re.compile(r"(?m)^\s{0,3}>\s?")
-MARKDOWN_TABLE_SEPARATOR_PATTERN = re.compile(r"(?m)^\s*\|?\s*:?-{3,}:?\s*(?:\|\s*:?-{3,}:?\s*)+\|?\s*$")
-MARKDOWN_DECORATION_PATTERN = re.compile(r"(?<!\w)(?:\*\*|__)([^\n]+?)(?:\*\*|__)(?!\w)|(?<!\w)(?:\*|_)([^\n]+?)(?:\*|_)(?!\w)")
-MARKDOWN_CODE_MARKER_PATTERN = re.compile(r"`{1,3}([^`\n]+)`{1,3}")
-
-
-class _ReadableHtmlParser(HTMLParser):
-    """Минимальный извлекатель читаемого текста из HTML на стандартной библиотеке."""
-
-    def __init__(self) -> None:
-        """Инициализирует буфер извлечённого текста."""
-
-        super().__init__(convert_charrefs=True)
-        self._parts: list[str] = []
-
-    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
-        """Добавляет разделитель перед блочными HTML-тегами."""
-
-        if tag.lower() in BLOCK_HTML_TAGS:
-            self._parts.append("\n")
-
-    def handle_endtag(self, tag: str) -> None:
-        """Добавляет разделитель после блочных HTML-тегов."""
-
-        if tag.lower() in BLOCK_HTML_TAGS:
-            self._parts.append("\n")
-
-    def handle_data(self, data: str) -> None:
-        """Сохраняет текстовые данные HTML-документа."""
-
-        if data:
-            self._parts.append(data)
-
-    def get_text(self) -> str:
-        """Возвращает извлечённый текст."""
-
-        return "".join(self._parts)
+BOILERPLATE_ATTRIBUTE_TOKENS = (
+    "ads",
+    "advert",
+    "banner",
+    "breadcrumb",
+    "button",
+    "carousel",
+    "comment",
+    "cookie",
+    "feedback",
+    "footer",
+    "header",
+    "login",
+    "menu",
+    "modal",
+    "nav",
+    "pagination",
+    "popup",
+    "promo",
+    "rating",
+    "related",
+    "share",
+    "sidebar",
+    "social",
+    "subscribe",
+    "toolbar",
+)
+MAIN_CONTENT_SELECTORS = (
+    "article",
+    "main",
+    "[role='main']",
+    ".article",
+    ".content",
+    ".doc-content",
+    ".entry-content",
+    ".kb-article",
+    ".main-content",
+    ".post-content",
+)
 
 
 @dataclass(frozen=True)
@@ -227,13 +209,13 @@ def find_suspicious_sequences(text: str, *, max_examples: int = 5) -> tuple[str,
 
 
 def get_text_quality_flags(text: str) -> TextQualityFlags:
-    """Собирает признаки качества текста документа.
+    """Собирает диагностические признаки качества текста.
 
     Аргументы:
-        text: Проверяемый исходный текст.
+        text: Проверяемый текст.
 
     Возвращает:
-        Набор флагов и примеров подозрительных фрагментов.
+        Набор флагов качества текста.
     """
 
     return TextQualityFlags(
@@ -245,35 +227,32 @@ def get_text_quality_flags(text: str) -> TextQualityFlags:
 
 
 def normalize_text_for_duplicate_detection(text: str) -> str:
-    """Нормализует текст для поиска полных и почти полных дублей.
-
-    Нормализация намеренно не используется как очистка корпуса: она нужна только
-    для сравнения документов в аудите.
+    """Нормализует текст для поиска дублей без изменения исходного корпуса.
 
     Аргументы:
         text: Исходный текст документа.
 
     Возвращает:
-        Упрощённое строковое представление для duplicate detection.
+        Нижний регистр без разметки и лишних пробелов.
     """
 
-    unescaped = html.unescape(text)
-    normalized = unicodedata.normalize("NFKC", unescaped).casefold()
+    normalized = html.unescape(text).lower()
     normalized = HTML_TAG_PATTERN.sub(" ", normalized)
-    normalized = re.sub(r"[`*_#>\[\](){}|]", " ", normalized)
+    normalized = re.sub(r"[`*_#>|\[\]()]", " ", normalized)
     normalized = re.sub(r"\W+", " ", normalized, flags=re.UNICODE)
-    return re.sub(r"\s+", " ", normalized).strip()
+    normalized = re.sub(r"\s+", " ", normalized)
+    return normalized.strip()
 
 
 def text_similarity(left: str, right: str) -> float:
-    """Считает похожесть двух уже нормализованных текстов.
+    """Считает похожесть двух текстов для диагностики почти дублей.
 
     Аргументы:
         left: Первый нормализованный текст.
         right: Второй нормализованный текст.
 
     Возвращает:
-        Коэффициент похожести ``SequenceMatcher`` от ``0`` до ``1``.
+        Коэффициент похожести ``SequenceMatcher``.
     """
 
     if not left and not right:
@@ -284,56 +263,49 @@ def text_similarity(left: str, right: str) -> float:
 
 
 def clean_html_markup(text: str) -> str:
-    """Извлекает читаемый текст из HTML без потери смысловых блоков.
+    """Извлекает основной читаемый текст из HTML-документа.
+
+    Основной путь использует ``trafilatura``. Если извлечение пустое или слишком
+    слабое для короткой/искусственной HTML-страницы, применяется fallback на
+    ``BeautifulSoup`` с парсером ``lxml`` и удалением служебных DOM-узлов.
 
     Аргументы:
-        text: Исходный текст, возможно содержащий HTML-теги и entities.
+        text: HTML-текст документа.
 
     Возвращает:
-        Текст без HTML-тегов, с декодированными HTML entities и сохранёнными
-        разделителями между блочными элементами.
+        Извлечённый основной текст страницы.
     """
 
-    parser = _ReadableHtmlParser()
-    parser.feed(text)
-    parser.close()
-    extracted = parser.get_text()
-    if not extracted.strip() and text.strip():
-        extracted = HTML_TAG_PATTERN.sub(" ", text)
-    return html.unescape(extracted)
-
-
-def clean_markdown_markup(text: str) -> str:
-    """Убирает служебные символы Markdown, сохраняя смысл текста.
-
-    Аргументы:
-        text: Исходный текст, возможно содержащий Markdown-разметку.
-
-    Возвращает:
-        Текст без основных Markdown-маркеров заголовков, списков, ссылок,
-        выделения, inline-code и таблиц.
-    """
-
-    cleaned = text.replace("\r\n", "\n").replace("\r", "\n")
-    cleaned = re.sub(r"(?m)^```.*$", "", cleaned)
-    cleaned = MARKDOWN_LINK_PATTERN.sub(lambda match: match.group(1) or match.group(2), cleaned)
-    cleaned = MARKDOWN_TABLE_SEPARATOR_PATTERN.sub("", cleaned)
-    cleaned = MARKDOWN_HEADING_PATTERN.sub("", cleaned)
-    cleaned = MARKDOWN_LIST_PATTERN.sub("", cleaned)
-    cleaned = MARKDOWN_BLOCKQUOTE_PATTERN.sub("", cleaned)
-    cleaned = MARKDOWN_CODE_MARKER_PATTERN.sub(lambda match: match.group(1), cleaned)
-    cleaned = MARKDOWN_DECORATION_PATTERN.sub(lambda match: match.group(1) or match.group(2) or "", cleaned)
-    cleaned = re.sub(r"(?m)^\s*\|(.+)\|\s*$", lambda match: " ".join(part.strip() for part in match.group(1).split("|")), cleaned)
+    cleaned, _ = _clean_html_markup_with_method(text)
     return cleaned
 
 
-def fix_mojibake_if_confident(text: str) -> tuple[str, bool]:
-    """Исправляет mojibake только при уверенном улучшении текста.
+def clean_markdown_markup(text: str) -> str:
+    """Сохраняет Markdown-структуру и выполняет только безопасную нормализацию.
 
-    Эвристика применяет обратное преобразование для частого случая, когда UTF-8
-    байты были ошибочно прочитаны как однобайтовая кодировка. Исправление
-    принимается только если после него становится меньше mojibake-маркеров и
-    больше кириллических символов.
+    На этапе очистки Markdown больше не превращается в plain text: заголовки,
+    списки, ссылки, таблицы и inline-code остаются структурными подсказками для
+    следующего Markdown-aware чанкинга.
+
+    Аргументы:
+        text: Исходный Markdown-текст.
+
+    Возвращает:
+        Markdown-текст с едиными переносами строк и без пробелов в конце строк.
+    """
+
+    markdown = text.replace("\r\n", "\n").replace("\r", "\n")
+    markdown = "\n".join(line.rstrip() for line in markdown.split("\n"))
+    return markdown
+
+
+def fix_mojibake_if_confident(text: str) -> tuple[str, bool]:
+    """Исправляет mojibake через ``ftfy`` только при улучшении диагностик.
+
+    Исправление принимается, если ``ftfy`` уменьшает число mojibake-маркеров,
+    улучшает общий диагностический score и не уменьшает число кириллических
+    символов. Символ ``�`` не восстанавливается эвристически, если исходные
+    байты уже потеряны.
 
     Аргументы:
         text: Проверяемый текст.
@@ -346,39 +318,34 @@ def fix_mojibake_if_confident(text: str) -> tuple[str, bool]:
     if original_marker_count == 0:
         return text, False
 
-    best_candidate = text
-    best_score = _mojibake_repair_score(text)
-    for source_encoding in ("latin1", "cp1252"):
-        try:
-            candidate = text.encode(source_encoding).decode("utf-8")
-        except UnicodeError:
-            continue
-        candidate_score = _mojibake_repair_score(candidate)
-        if candidate_score > best_score:
-            best_candidate = candidate
-            best_score = candidate_score
-
-    if best_candidate == text:
+    candidate = fix_text(text)
+    if candidate == text:
         return text, False
-    if _count_mojibake_markers(best_candidate) >= original_marker_count:
+    if _count_mojibake_markers(candidate) >= original_marker_count:
         return text, False
-    if _count_cyrillic_letters(best_candidate) <= _count_cyrillic_letters(text):
+    if _count_cyrillic_letters(candidate) < _count_cyrillic_letters(text):
         return text, False
-    return best_candidate, True
+    if _mojibake_repair_score(candidate) <= _mojibake_repair_score(text):
+        return text, False
+    return candidate, True
 
 
 def normalize_whitespace(text: str) -> str:
-    """Нормализует пробелы и переносы строк в очищенном тексте.
+    """Нормализует Unicode, пробелы, переносы строк и переносы по дефису.
 
     Аргументы:
-        text: Текст после исправления кодировки и очистки разметки.
+        text: Текст после форматной очистки.
 
     Возвращает:
-        Текст с едиными переносами строк, без лишних пробелов и пустых строк.
+        Текст с едиными переносами строк, без управляющих символов и лишних
+        пробелов. Содержательная Markdown-разметка при этом сохраняется.
     """
 
     normalized = unicodedata.normalize("NFKC", text)
     normalized = normalized.replace("\r\n", "\n").replace("\r", "\n")
+    normalized = normalized.replace("\u00ad", "")
+    normalized = CONTROL_CHAR_PATTERN.sub("", normalized)
+    normalized = HYPHENATED_LINE_BREAK_PATTERN.sub("", normalized)
     normalized = re.sub(r"[\t\f\v]+", " ", normalized)
     normalized = re.sub(r"[ \u00a0]{2,}", " ", normalized)
     normalized = re.sub(r" *\n *", "\n", normalized)
@@ -406,12 +373,15 @@ def clean_text(text: str, *, source_format: str = "text") -> tuple[str, tuple[st
         operations.append("mojibake_fixed")
 
     if source_format == "html" or has_html_markup(cleaned):
-        cleaned = clean_html_markup(cleaned)
-        operations.append("html_cleaned")
+        cleaned, html_operation = _clean_html_markup_with_method(cleaned)
+        operations.extend(("html_cleaned", html_operation))
 
     if source_format == "markdown" or has_markdown_markup(cleaned):
-        cleaned = clean_markdown_markup(cleaned)
-        operations.append("markdown_cleaned")
+        preserved_markdown = clean_markdown_markup(cleaned)
+        if preserved_markdown != cleaned:
+            operations.append("markdown_whitespace_normalized")
+        cleaned = preserved_markdown
+        operations.append("markdown_marked_for_chunking")
 
     normalized = normalize_whitespace(cleaned)
     if normalized != cleaned:
@@ -459,6 +429,95 @@ def clean_corpus(documents: Sequence[KnowledgeDocument]) -> list[CleanedDocument
     """
 
     return [clean_document(document) for document in documents]
+
+
+def _clean_html_markup_with_method(text: str) -> tuple[str, str]:
+    """Извлекает HTML и возвращает текст вместе с названием выбранного метода."""
+
+    trafilatura_text = _extract_html_with_trafilatura(text)
+    fallback_text = ""
+    if not _is_meaningful_html_extraction(text, trafilatura_text):
+        fallback_text = _extract_html_with_beautifulsoup(text)
+        if fallback_text:
+            return fallback_text, "html_bs4_fallback"
+    if trafilatura_text:
+        return trafilatura_text, "html_trafilatura"
+    fallback_text = fallback_text or _extract_html_with_beautifulsoup(text)
+    if fallback_text:
+        return fallback_text, "html_bs4_fallback"
+    return html.unescape(HTML_TAG_PATTERN.sub(" ", text)), "html_regex_last_resort"
+
+
+def _extract_html_with_trafilatura(text: str) -> str:
+    """Извлекает основной текст HTML через ``trafilatura``."""
+
+    try:
+        extracted = trafilatura.extract(
+            text,
+            include_comments=False,
+            include_formatting=False,
+            include_images=False,
+            include_links=False,
+            include_tables=True,
+            no_fallback=False,
+            output_format="txt",
+        )
+    except (LookupError, ValueError, TypeError):
+        return ""
+    return extracted.strip() if extracted else ""
+
+
+def _extract_html_with_beautifulsoup(text: str) -> str:
+    """Извлекает HTML через ``BeautifulSoup``/``lxml`` после удаления boilerplate."""
+
+    soup = BeautifulSoup(text, "lxml")
+    for tag in soup(BOILERPLATE_TAGS):
+        tag.decompose()
+    for element in list(soup.find_all(True)):
+        if _is_boilerplate_element(element):
+            element.decompose()
+
+    candidates = [element.get_text("\n", strip=True) for selector in MAIN_CONTENT_SELECTORS for element in soup.select(selector)]
+    candidates = [candidate for candidate in candidates if candidate]
+    if candidates:
+        return max(candidates, key=_content_score).strip()
+
+    body = soup.body or soup
+    return body.get_text("\n", strip=True).strip()
+
+
+def _is_boilerplate_element(element: object) -> bool:
+    """Проверяет DOM-элемент на служебные классы, id и ARIA-описания."""
+
+    attrs = getattr(element, "attrs", {}) or {}
+    values: list[str] = []
+    for attr_name in ("id", "class", "role", "aria-label", "data-testid"):
+        value = attrs.get(attr_name)
+        if isinstance(value, str):
+            values.append(value)
+        elif isinstance(value, Sequence):
+            values.extend(str(item) for item in value)
+    haystack = " ".join(values).lower()
+    return any(token in haystack for token in BOILERPLATE_ATTRIBUTE_TOKENS)
+
+
+def _is_meaningful_html_extraction(original_html: str, extracted_text: str) -> bool:
+    """Оценивает, достаточно ли хорош результат ``trafilatura``."""
+
+    if not extracted_text:
+        return False
+    word_count = len(re.findall(r"\w+", extracted_text, flags=re.UNICODE))
+    if word_count >= 12:
+        return True
+    visible_text = _extract_html_with_beautifulsoup(original_html)
+    return bool(visible_text and len(extracted_text) >= min(80, len(visible_text) * 0.5))
+
+
+def _content_score(text: str) -> int:
+    """Оценивает насыщенность кандидата содержательным текстом."""
+
+    boilerplate_penalty = sum(text.lower().count(token) for token in BOILERPLATE_ATTRIBUTE_TOKENS) * 30
+    return len(text) - boilerplate_penalty
 
 
 def _count_mojibake_markers(text: str) -> int:
