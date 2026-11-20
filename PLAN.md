@@ -580,7 +580,7 @@ python -c "import langchain; import chromadb; import sentence_transformers; prin
 
 ## 5.1. Реализовать клиент LLM
 
-**Статус:** `[ ]`
+**Статус:** `[x]`
 
 ### Задачи
 
@@ -597,7 +597,7 @@ python -c "import langchain; import chromadb; import sentence_transformers; prin
 
 ## 5.2. Реализовать prompt для RAG-ответа
 
-**Статус:** `[ ]`
+**Статус:** `[x]`
 
 ### Задачи
 
@@ -614,7 +614,7 @@ python -c "import langchain; import chromadb; import sentence_transformers; prin
 
 ## 5.3. Собрать полный RAG-пайплайн
 
-**Статус:** `[ ]`
+**Статус:** `[x]`
 
 ### Задачи
 
@@ -1488,7 +1488,7 @@ Gap-поведение: ...
 
 - `.\.venv\Scripts\python.exe -m pip install trafilatura ftfy beautifulsoup4 lxml` — зависимости установлены в локальное `.venv`.
 - `.\.venv\Scripts\python.exe -c "import trafilatura, ftfy, bs4, lxml; print('deps ok')"` — импорт зависимостей успешен.
-- `$files = Get-ChildItem -Path src -Filter '*.py' | ForEach-Object { $_.FullName }; .\.venv\Scripts\python.exe -m py_compile @files` — все Python-модули `src/*.py` компилируются.
+- `$files = Get-ChildItem -Path src -Filter '*.py' | ForEach-Object { $_.FullName }; .\.venv\Scripts\python.exe -m py_compile @files` — все Python-модули `src/*.py` компилируются; при повторной финальной проверке после smoke-запусков Windows один раз заблокировал перезапись `.pyc`, после `Remove-Item -Recurse -Force .\src\__pycache__` компиляция повторно прошла успешно.
 - `.\.venv\Scripts\python.exe temp/_audit_cleaning.py` с `PYTHONPATH` на корень проекта — очистка 181 документа, повторный аудит, таблица операций и таблица примеров успешно строятся.
 - `.\.venv\Scripts\python.exe -c "import json; from pathlib import Path; nb=json.loads(Path('notebooks/rag_filmoskop_project.ipynb').read_text(encoding='utf-8')); print('NOTEBOOK_JSON_OK'); print('CELLS=' + str(len(nb['cells'])))"` — notebook остаётся валидным JSON, количество ячеек `20`.
 
@@ -1920,4 +1920,69 @@ Gap-поведение: ...
 
 **Следующий шаг:**
 
-- Перейти к этапу `5.1. Реализовать клиент LLM`: подготовить OpenAI-compatible клиент локального Qwen-сервера с `chat_template_kwargs.enable_thinking=false`, затем в `5.2`–`5.3` собрать prompt и полный RAG-пайплайн поверх выбранного retrieval-пайплайна.
+- Этот шаг закрыт в журнале этапа 5 ниже: реализованы LLM-клиент, RAG prompt и полный pipeline.
+
+## Журнал выполнения: этап 5
+
+### 2026-11-20 — пункты `5.1`–`5.3`: LLM-клиент, RAG prompt и полный pipeline
+
+**Файлы изменены:**
+
+- `src/generation.py`;
+- `PLAN.md`.
+
+**Что сделано:**
+
+- В `src/generation.py` реализован OpenAI-compatible клиент `OpenAIChatClient` для локального Qwen-сервера:
+  - использует настройки `settings.llm.base_url`, `api_key`, `model_name`, `temperature`, `timeout_seconds`, `max_tokens`;
+  - передаёт дополнительное тело запроса `chat_template_kwargs={"enable_thinking": false}` через `extra_body`;
+  - извлекает финальный ответ строго из `choices[0].message.content`;
+  - если сервер вернул текст только в `message.reasoning_content`, выбрасывает понятную ошибку с напоминанием проверить отключение thinking-режима.
+- Добавлена функция `create_langchain_chat_model()` для создания `langchain-openai.ChatOpenAI` с теми же настройками и `extra_body`; это закрывает основной LangChain-вариант из пункта `5.1`.
+- Добавлены структуры результата:
+  - `LlmResponse` — ответ LLM, имя модели, usage и raw response;
+  - `RagResponse` — вопрос, ответ, использованные chunks, источники, prompt и diagnostics.
+- Реализован RAG prompt builder:
+  - `build_rag_context()` формирует контекст из top-K chunks с `doc_id`, `chunk_id`, названием, категорией и текстом фрагмента;
+  - `build_rag_prompt()` явно разделяет `Контекст`, `Вопрос` и `Ответ`;
+  - prompt запрещает отвечать вне контекста и фиксирует фразу отказа из `settings.generation.refusal_phrase`.
+- Реализованы функции генерации и полного пайплайна:
+  - `generate_answer()` строит prompt и вызывает LLM;
+  - `run_rag_pipeline()` выполняет retrieval через итоговый `hybrid_retrieve()`, формирует контекст, вызывает генератор и возвращает источники/диагностику.
+- Добавлены вспомогательные функции:
+  - `build_sources()` для компактного списка источников;
+  - `extract_message_content()` для строгой проверки `message.content`;
+  - `validate_llm_settings()` для ранней проверки настроек LLM.
+
+**Статус:**
+
+- `5.1. Реализовать клиент LLM` — `[x]`.
+- `5.2. Реализовать prompt для RAG-ответа` — `[x]`.
+- `5.3. Собрать полный RAG-пайплайн` — `[x]` на уровне модульного кода и fake smoke-проверки без сетевого LLM-вызова.
+
+**Проверки:**
+
+- `$files = Get-ChildItem -Path src -Filter '*.py' | ForEach-Object { $_.FullName }; .\.venv\Scripts\python.exe -m py_compile @files` — все Python-модули `src/*.py` компилируются.
+- Smoke prompt/parser/langchain:
+  - `build_rag_prompt()` содержит разделение контекста/вопроса и фразу отказа;
+  - `extract_message_content()` возвращает непустой `choices[0].message.content`;
+  - `create_langchain_chat_model()` создаёт `ChatOpenAI` с `extra_body.chat_template_kwargs.enable_thinking=false`.
+- Smoke полного RAG-пайплайна без сетевого вызова:
+  - fake retriever возвращает top-1 chunk;
+  - fake LLM получает prompt с `doc_id`;
+  - `run_rag_pipeline()` возвращает answer, sources и diagnostics;
+  - ответ только в `reasoning_content` при пустом `content` корректно считается ошибкой.
+- `git --no-pager diff --check` — whitespace-проверка diff проходит.
+- `git --no-pager status --short` — ожидаемые tracked-изменения: `PLAN.md`, `src/generation.py`.
+
+**Ошибки и предупреждения:**
+
+- Реальный вызов локальной Qwen3.5-модели не выполнялся: в текущей проверке не подтверждалась доступность сервера `http://localhost:8080/v1`. Модульная логика проверена без сети через fake-клиент.
+- При попытке передать smoke-скрипт с кириллическими литералами через PowerShell stdin кириллица отобразилась как `????`; для дальнейших Unicode-smoke лучше использовать `python -c` с ASCII-инвариантами, временные UTF-8 `.py` файлы или notebook/файлы проекта.
+- Повторная компиляция после нескольких Python-запусков один раз завершилась `WinError 5` на файле `src\__pycache__\retrieval.cpython-311.pyc`; локальный `__pycache__` удалён, затем та же команда `py_compile` прошла успешно.
+- Notebook outputs ещё не синхронизированы с новой реализацией этапа 5; полный запуск notebook сверху вниз остаётся отдельной задачей.
+- Retrieval-цель `recall@5 >= 0.85` всё ещё не достигнута по итогам этапа 4; этап 5 добавляет генерацию, но не улучшает сам recall.
+
+**Следующий шаг:**
+
+- Перейти к этапу `6.1. Реализовать LLM-as-judge`: добавить judge prompt, JSON-парсинг и обработку невалидного ответа; параллельно при доступном локальном Qwen-сервере выполнить реальный smoke `OpenAIChatClient.complete()` и демонстрационные RAG-примеры в notebook для `exact`, `semantic`, `multi`, `gap`.
