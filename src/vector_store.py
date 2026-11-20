@@ -27,6 +27,20 @@ class ChromaCollectionInfo:
     document_count: int
 
 
+def build_main_collection_name(prefix: str, strategy_name: str) -> str:
+    """Строит имя основной Chroma collection для выбранной стратегии чанкинга.
+
+    Аргументы:
+        prefix: Префикс из настроек ``CHROMA_COLLECTION_PREFIX``.
+        strategy_name: Имя выбранной стратегии чанкинга.
+
+    Возвращает:
+        Стабильное имя основной collection.
+    """
+
+    return build_collection_name(prefix, strategy_name, suffix="main")
+
+
 def build_collection_name(prefix: str, strategy_name: str, *, suffix: str = "tmp_compare") -> str:
     """Строит стабильное имя collection для эксперимента сравнения чанкинга.
 
@@ -81,6 +95,32 @@ def recreate_chroma_collection(
     collection = client.create_collection(name=collection_name, metadata={"hnsw:space": "cosine"})
     add_documents_with_embeddings(collection, documents, embeddings)
     return collection
+
+
+def recreate_main_chroma_collection(
+    settings: ChromaSettings,
+    strategy_name: str,
+    documents: Sequence[Document],
+    embeddings: Sequence[Sequence[float]],
+) -> Any:
+    """Пересоздаёт основную Chroma collection для baseline retrieval.
+
+    Функция использует ``CHROMA_PERSIST_DIR`` и ``CHROMA_COLLECTION_PREFIX`` из
+    настроек проекта. Повторный запуск сначала удаляет collection с тем же
+    именем, поэтому Chroma не накапливает неконтролируемые дубли чанков.
+
+    Аргументы:
+        settings: Блок ``settings.chroma`` из конфигурации проекта.
+        strategy_name: Имя выбранной стратегии чанкинга.
+        documents: Чанки LangChain ``Document``.
+        embeddings: Готовые embedding-векторы чанков.
+
+    Возвращает:
+        Пересозданная Chroma collection.
+    """
+
+    collection_name = build_main_collection_name(settings.collection_prefix, strategy_name)
+    return recreate_chroma_collection(settings, collection_name, documents, embeddings)
 
 
 def build_persistent_chroma_client(persist_dir: str | Path) -> Any:
@@ -155,6 +195,42 @@ def describe_chroma_collection(collection: Any, persist_dir: str | Path) -> Chro
     )
 
 
+def peek_chroma_collection_records(collection: Any, *, limit: int = 3, text_preview_chars: int = 160) -> list[dict[str, Any]]:
+    """Возвращает несколько записей collection для проверки документов и metadata.
+
+    Аргументы:
+        collection: Chroma collection.
+        limit: Максимальное число записей для просмотра.
+        text_preview_chars: Максимальная длина текстового превью.
+
+    Возвращает:
+        Список словарей с ``id``, ``metadata`` и укороченным текстом чанка.
+    """
+
+    normalized_limit = int(limit)
+    if normalized_limit <= 0:
+        raise ValueError(f"limit должен быть положительным числом, получено: {limit}.")
+    normalized_preview = int(text_preview_chars)
+    if normalized_preview <= 0:
+        raise ValueError(f"text_preview_chars должен быть положительным числом, получено: {text_preview_chars}.")
+
+    response = collection.get(limit=normalized_limit, include=["documents", "metadatas"])
+    ids = response.get("ids") or []
+    documents = response.get("documents") or []
+    metadatas = response.get("metadatas") or []
+    records: list[dict[str, Any]] = []
+    for record_id, text, metadata in zip(ids, documents, metadatas):
+        text_value = str(text or "")
+        records.append(
+            {
+                "id": str(record_id),
+                "metadata": dict(metadata or {}),
+                "text_preview": _trim_text(text_value, normalized_preview),
+            }
+        )
+    return records
+
+
 def remove_chroma_persist_dir(persist_dir: str | Path) -> None:
     """Удаляет директорию временного Chroma-хранилища, если она существует.
 
@@ -202,12 +278,24 @@ def _validate_collection_inputs(
             raise ValueError(f"Документ index={index}, chunk_id={chunk_id} имеет пустой page_content.")
 
 
+def _trim_text(text: str, max_chars: int) -> str:
+    """Обрезает текст до заданной длины для диагностических таблиц."""
+
+    normalized = " ".join(text.split())
+    if len(normalized) <= max_chars:
+        return normalized
+    return f"{normalized[: max_chars - 1]}…"
+
+
 __all__ = [
     "ChromaCollectionInfo",
     "add_documents_with_embeddings",
     "build_collection_name",
+    "build_main_collection_name",
     "build_persistent_chroma_client",
     "describe_chroma_collection",
+    "peek_chroma_collection_records",
     "recreate_chroma_collection",
+    "recreate_main_chroma_collection",
     "remove_chroma_persist_dir",
 ]

@@ -84,6 +84,37 @@ def compute_retrieval_metrics(
     )
 
 
+def compute_retrieval_metrics_by_kind(
+    results: Sequence[RetrievalResult],
+    *,
+    k: int = 5,
+    recall_k_values: Sequence[int] = DEFAULT_RECALL_K_VALUES,
+) -> dict[str, RetrievalMetricsSummary]:
+    """Считает retrieval-метрики отдельно по типам answerable-запросов.
+
+    ``gap``-запросы не включаются: для них качество оценивается на этапе
+    генерации и политики отказа, а не через retrieval-recall.
+
+    Аргументы:
+        results: Результаты retrieval.
+        k: Значение K для ``precision@K`` и ``recall@K``.
+        recall_k_values: Набор K для recall-кривой.
+
+    Возвращает:
+        Словарь ``kind -> RetrievalMetricsSummary``.
+    """
+
+    grouped: dict[str, list[RetrievalResult]] = {}
+    for result in results:
+        if result.kind == "gap":
+            continue
+        grouped.setdefault(result.kind, []).append(result)
+    return {
+        kind: compute_retrieval_metrics(kind_results, k=k, recall_k_values=recall_k_values)
+        for kind, kind_results in sorted(grouped.items())
+    }
+
+
 def precision_at_k(retrieved_doc_ids: Sequence[int], relevant_doc_ids: Sequence[int], k: int) -> float:
     """Считает ``precision@K`` по уникальным ``doc_id``.
 
@@ -181,6 +212,7 @@ __all__ = [
     "DEFAULT_RECALL_K_VALUES",
     "RetrievalMetricsSummary",
     "compute_retrieval_metrics",
+    "compute_retrieval_metrics_by_kind",
     "find_zero_recall_queries",
     "precision_at_k",
     "recall_at_k",

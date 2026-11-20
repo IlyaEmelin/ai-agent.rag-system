@@ -74,6 +74,7 @@ def dense_retrieve(
     settings: RetrievalSettings,
     *,
     top_k: int | None = None,
+    where: dict[str, Any] | None = None,
 ) -> list[RetrievedChunk]:
     """Выполняет dense retrieval одного запроса через Chroma.
 
@@ -83,6 +84,7 @@ def dense_retrieve(
         query: Пользовательский вопрос.
         settings: Блок ``settings.retrieval``.
         top_k: Необязательное переопределение числа возвращаемых чанков.
+        where: Необязательный Chroma-фильтр по metadata.
 
     Возвращает:
         Список найденных чанков с metadata, distance и rank.
@@ -94,13 +96,18 @@ def dense_retrieve(
     if not isinstance(query, str) or not query.strip():
         raise ValueError(f"Текст запроса должен быть непустой строкой, получено: {query!r}.")
 
+    fetch_k = max(requested_top_k, int(settings.fetch_k))
     query_embedding = embedding_model.embed_query(query)
-    response = collection.query(
-        query_embeddings=[query_embedding],
-        n_results=requested_top_k,
-        include=["documents", "metadatas", "distances"],
-    )
-    return _parse_chroma_query_response(response, score_threshold=settings.score_threshold)
+    query_kwargs: dict[str, Any] = {
+        "query_embeddings": [query_embedding],
+        "n_results": fetch_k,
+        "include": ["documents", "metadatas", "distances"],
+    }
+    if where:
+        query_kwargs["where"] = where
+    response = collection.query(**query_kwargs)
+    chunks = _parse_chroma_query_response(response, score_threshold=settings.score_threshold)
+    return chunks[:requested_top_k]
 
 
 def evaluate_dense_retrieval(
@@ -111,6 +118,7 @@ def evaluate_dense_retrieval(
     *,
     top_k: int | None = None,
     include_gap_queries: bool = False,
+    where: dict[str, Any] | None = None,
 ) -> list[RetrievalResult]:
     """Прогоняет dense retrieval по набору тестовых запросов.
 
@@ -121,6 +129,7 @@ def evaluate_dense_retrieval(
         settings: Настройки retrieval.
         top_k: Необязательное число возвращаемых чанков.
         include_gap_queries: Нужно ли включать ``gap``-запросы в прогон.
+        where: Необязательный Chroma-фильтр по metadata.
 
     Возвращает:
         Список ``RetrievalResult``.
@@ -130,7 +139,7 @@ def evaluate_dense_retrieval(
     for evaluation_query in queries:
         if evaluation_query.kind == "gap" and not include_gap_queries:
             continue
-        chunks = dense_retrieve(collection, embedding_model, evaluation_query.query, settings, top_k=top_k)
+        chunks = dense_retrieve(collection, embedding_model, evaluation_query.query, settings, top_k=top_k, where=where)
         results.append(
             RetrievalResult(
                 query=evaluation_query.query,
@@ -140,6 +149,69 @@ def evaluate_dense_retrieval(
             )
         )
     return results
+
+
+def format_retrieved_chunks(chunks: Sequence[RetrievedChunk], *, text_preview_chars: int = 220) -> list[dict[str, Any]]:
+    """Форматирует найденные чанки для человекочитаемого вывода в notebook.
+
+    Аргументы:
+        chunks: Результаты retrieval.
+        text_preview_chars: Максимальная длина текстового превью.
+
+    Возвращает:
+        Список строк-словарей с основными metadata и score.
+    """
+
+    if text_preview_chars <= 0:
+        raise ValueError(f"text_preview_chars должен быть положительным числом, получено: {text_preview_chars}.")
+    rows: list[dict[str, Any]] = []
+    for chunk in chunks:
+        rows.append(
+            {
+                "rank": chunk.rank,
+                "doc_id": chunk.doc_id,
+                "title": chunk.metadata.get("title", ""),
+                "category": chunk.metadata.get("category", ""),
+                "chunk_id": chunk.chunk_id,
+                "score": round(chunk.score, 6) if chunk.score is not None else None,
+                "distance": round(chunk.distance, 6) if chunk.distance is not None else None,
+                "text_preview": _trim_text(chunk.text, text_preview_chars),
+            }
+        )
+    return rows
+
+
+def summarize_score_distribution(results: Sequence[RetrievalResult]) -> list[dict[str, int | float | str | None]]:
+    """Собирает распределение top-1 score отдельно для answerable и gap-запросов.
+
+    Аргументы:
+        results: Результаты retrieval, желательно с ``include_gap_queries=True``.
+
+    Возвращает:
+        Таблица статистик top-1 score по группам ``answerable`` и ``gap``.
+    """
+
+    groups: dict[str, list[float]] = {"answerable": [], "gap": []}
+    for result in results:
+        group_name = "gap" if result.kind == "gap" else "answerable"
+        if result.retrieved_chunks and result.retrieved_chunks[0].score is not None:
+            groups[group_name].append(float(result.retrieved_chunks[0].score))
+
+    rows: list[dict[str, int | float | str | None]] = []
+    for group_name, scores in groups.items():
+        sorted_scores = sorted(scores)
+        rows.append(
+            {
+                "group": group_name,
+                "queries_with_results": len(sorted_scores),
+                "min_top1_score": round(sorted_scores[0], 6) if sorted_scores else None,
+                "p25_top1_score": round(_quantile(sorted_scores, 0.25), 6) if sorted_scores else None,
+                "median_top1_score": round(_quantile(sorted_scores, 0.50), 6) if sorted_scores else None,
+                "p75_top1_score": round(_quantile(sorted_scores, 0.75), 6) if sorted_scores else None,
+                "max_top1_score": round(sorted_scores[-1], 6) if sorted_scores else None,
+            }
+        )
+    return rows
 
 
 def _parse_chroma_query_response(response: dict[str, Any], *, score_threshold: float) -> list[RetrievedChunk]:
@@ -190,9 +262,35 @@ def _first_result_list(value: Any) -> list[Any]:
     return first
 
 
+def _trim_text(text: str, max_chars: int) -> str:
+    """Обрезает текст до заданной длины для диагностических таблиц."""
+
+    normalized = " ".join(text.split())
+    if len(normalized) <= max_chars:
+        return normalized
+    return f"{normalized[: max_chars - 1]}…"
+
+
+def _quantile(values: Sequence[float], q: float) -> float:
+    """Возвращает линейно интерполированный квантиль для непустого списка."""
+
+    if not values:
+        return 0.0
+    if len(values) == 1:
+        return float(values[0])
+    bounded_q = min(max(float(q), 0.0), 1.0)
+    position = (len(values) - 1) * bounded_q
+    lower_index = int(position)
+    upper_index = min(lower_index + 1, len(values) - 1)
+    fraction = position - lower_index
+    return float(values[lower_index] * (1.0 - fraction) + values[upper_index] * fraction)
+
+
 __all__ = [
     "RetrievedChunk",
     "RetrievalResult",
     "dense_retrieve",
     "evaluate_dense_retrieval",
+    "format_retrieved_chunks",
+    "summarize_score_distribution",
 ]

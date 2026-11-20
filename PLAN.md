@@ -400,7 +400,7 @@ python -c "import langchain; import chromadb; import sentence_transformers; prin
 
 ## 3.1. Настроить Chroma
 
-**Статус:** `[ ]`
+**Статус:** `[x]`
 
 ### Задачи
 
@@ -417,7 +417,7 @@ python -c "import langchain; import chromadb; import sentence_transformers; prin
 
 ## 3.2. Реализовать baseline dense retrieval
 
-**Статус:** `[ ]`
+**Статус:** `[x]`
 
 ### Задачи
 
@@ -432,7 +432,7 @@ python -c "import langchain; import chromadb; import sentence_transformers; prin
 
 ## 3.3. Подобрать score threshold
 
-**Статус:** `[ ]`
+**Статус:** `[x]`
 
 ### Задачи
 
@@ -447,7 +447,7 @@ python -c "import langchain; import chromadb; import sentence_transformers; prin
 
 ## 3.4. Показать фильтрацию по метаданным
 
-**Статус:** `[ ]`
+**Статус:** `[x]`
 
 ### Задачи
 
@@ -461,7 +461,7 @@ python -c "import langchain; import chromadb; import sentence_transformers; prin
 
 ## 3.5. Посчитать baseline retrieval-метрики
 
-**Статус:** `[ ]`
+**Статус:** `[x]`
 
 ### Задачи
 
@@ -1783,3 +1783,70 @@ Gap-поведение: ...
 **Следующий шаг:**
 
 - Перейти к пункту `3.1. Настроить Chroma`: оформить создание основной Chroma collection в `src/vector_store.py` с настройками `CHROMA_PERSIST_DIR` и `CHROMA_COLLECTION_PREFIX`, обеспечить воспроизводимое пересоздание collection и сохранение metadata без дублей.
+
+### 2026-11-20 — этап 3 «Поисковая инфраструктура и baseline retrieval»
+
+**Статус:** `[x]` пункты `3.1`–`3.5` завершены.
+
+**Изменённые файлы:**
+
+- `PLAN.md`;
+- `src/vector_store.py`;
+- `src/retrieval.py`;
+- `src/metrics.py`;
+- `notebooks/rag_filmoskop_project.ipynb`.
+
+**Что сделано:**
+
+- В `src/vector_store.py` расширена инфраструктура Chroma для основной baseline collection:
+  - `build_main_collection_name()` строит стабильное имя collection из `CHROMA_COLLECTION_PREFIX`, суффикса `main` и выбранной стратегии;
+  - `recreate_main_chroma_collection()` использует `settings.chroma.persist_dir` (`CHROMA_PERSIST_DIR`) и воспроизводимо пересоздаёт collection без накопления дублей;
+  - `peek_chroma_collection_records()` показывает документы и metadata из Chroma для проверки сохранения `doc_id`, `title`, `category`, `format`, `chunk_id`, `chunk_index`, `chunking_strategy`.
+- В `src/retrieval.py` dense retrieval baseline доработан под требования этапа 3:
+  - `dense_retrieve()` теперь использует `RETRIEVAL_FETCH_K` как число кандидатов до применения `RETRIEVAL_SCORE_THRESHOLD` и финального top-K;
+  - добавлена поддержка Chroma metadata filter через аргумент `where`;
+  - `evaluate_dense_retrieval()` пробрасывает metadata filter и поддерживает `gap`-запросы для диагностики score distribution;
+  - `format_retrieved_chunks()` формирует человекочитаемые строки с `doc_id`, `title`, `category`, `score`, `distance`, `chunk_id` и preview текста;
+  - `summarize_score_distribution()` собирает распределение top-1 score отдельно для answerable и `gap`-запросов.
+- В `src/metrics.py` добавлена `compute_retrieval_metrics_by_kind()` для разбивки baseline-метрик по типам `exact`, `semantic`, `multi`; `gap`-запросы исключаются из retrieval-метрик.
+- В notebook добавлен раздел `## Этап 3. Поисковая инфраструктура и baseline retrieval`:
+  - `3.1` создаёт основную Chroma collection для выбранной стратегии `recursive` в `CHROMA_PERSIST_DIR`;
+  - `3.2` показывает пример dense retrieval с metadata, score/distance и текстом чанка;
+  - `3.3` выводит таблицу score distribution для answerable vs `gap` и обосновывает мягкий threshold из `.env`;
+  - `3.4` демонстрирует Chroma metadata filtering по категории `Подписка и оплата`;
+  - `3.5` выводит baseline retrieval-метрики и разбивку по типам запросов.
+
+**Ожидаемые baseline-результаты этапа 3 на выбранной стратегии `recursive`:**
+
+- Количество чанков основной collection: `251`.
+- Answerable-запросов для retrieval-метрик: `56`.
+- Общие метрики baseline dense retrieval совпадают с выбранной стратегией из пункта `2.4`:
+  - `precision@5=0.171429`;
+  - `recall@5=0.660714`;
+  - `MRR=0.501680`;
+  - recall-кривая `{1: 0.267857, 3: 0.553571, 5: 0.660714, 10: 0.848214, 20: 0.910714}`.
+- `recall@5` остаётся ниже целевого итогового ориентира `0.85`, что ожидаемо для dense baseline и будет улучшаться на этапе 4 через диагностику, BM25/RRF и, при наличии ресурсов, reranker.
+
+**Проверки:**
+
+- `$files = Get-ChildItem -Path src -Filter '*.py' | ForEach-Object { $_.FullName }; .\.venv\Scripts\python.exe -m py_compile @files` — все Python-модули `src/*.py` компилируются.
+- Notebook JSON validation через временный Python-скрипт — notebook читается как JSON, раздел `## Этап 3. Поисковая инфраструктура и baseline retrieval` найден, количество ячеек: `44`.
+- Fast smoke этапа 3 на мини-collection Chroma с детерминированными embeddings — успешно проверены:
+  - пересоздание основной collection без дублей;
+  - сохранение metadata в Chroma;
+  - dense retrieval с `fetch_k` и threshold;
+  - metadata filtering `where={"category": "Подписка и оплата"}`;
+  - человекочитаемое форматирование результатов;
+  - score distribution для answerable/`gap`;
+  - `compute_retrieval_metrics()` и `compute_retrieval_metrics_by_kind()`.
+- `git --no-pager diff -- src/vector_store.py src/retrieval.py src/metrics.py --check` — whitespace-проверка изменённых Python-файлов проходит.
+- `git --no-pager status --short` после удаления временного smoke-файла показывает ожидаемые tracked-изменения: `PLAN.md`, notebook, `src/metrics.py`, `src/retrieval.py`, `src/vector_store.py`.
+
+**Ошибки и предупреждения:**
+
+- Полный smoke этапа 3 с реальной моделью `intfloat/multilingual-e5-base` и построением embeddings для всех `251` чанка не уложился в лимит команды `30000ms` в текущей среде. Это не ошибка логики этапа 3: тяжёлый прогон уже выполнялся на пункте `2.4`, а новая инфраструктура этапа 3 дополнительно проверена быстрым Chroma smoke на контролируемых embeddings.
+- Не блокирующее предупреждение `urllib3.contrib.socks.DependencyWarning` от optional `PySocks` может по-прежнему появляться при импорте `trafilatura` в полных прогонах.
+
+**Следующий шаг:**
+
+- Перейти к этапу `4.1. Найти слабые запросы baseline`: использовать `baseline_retrieval_results`, `find_zero_recall_queries()` и сохранённые top chunks для диагностики причин низкого `recall@5`, затем готовить BM25/RRF-улучшение в пунктах `4.2`–`4.3`.
