@@ -327,7 +327,7 @@ python -c "import langchain; import chromadb; import sentence_transformers; prin
 
 ## 2.2. Реализовать две стратегии чанкинга
 
-**Статус:** `[ ]`
+**Статус:** `[x]`
 
 ### Стратегия A
 
@@ -1573,3 +1573,81 @@ Gap-поведение: ...
 **Следующий шаг:**
 
 - Перейти к пункту `2.2. Реализовать две стратегии чанкинга`: построить чанки из подготовленных `langchain_docs`, для Markdown-документов использовать Markdown-aware splitting, а каждому чанку добавить metadata `doc_id`, `title`, `category`, `format`, `chunk_id`, `chunk_index`, `chunking_strategy`.
+
+### 2026-11-20 — пункт 2.2 «Реализовать две стратегии чанкинга»
+
+**Статус:** `[x]` пункт `2.2` завершён.
+
+**Изменённые файлы:**
+
+- `PLAN.md`;
+- `src/chunking.py`;
+- `notebooks/rag_filmoskop_project.ipynb`.
+
+**Что сделано:**
+
+- В `src/chunking.py` добавлена конфигурация стратегии `ChunkingStrategy`.
+- Добавлена функция `build_chunking_strategies_from_settings()`, которая строит две стратегии из `settings.chunking`:
+  - `recursive`: `CHUNK_SIZE=900`, `CHUNK_OVERLAP=150`;
+  - `markdown_aware`: `ALT_CHUNK_SIZE=600`, `ALT_CHUNK_OVERLAP=100`.
+- Реализовано построение чанков через `build_document_chunks()`.
+- Для каждого чанка сохраняются metadata исходного документа и добавляются:
+  - `chunk_id`;
+  - `chunk_index`;
+  - `chunking_strategy`.
+- Добавлена валидация metadata чанков через `validate_chunk_metadata()` и набор обязательных полей `REQUIRED_CHUNK_METADATA`.
+- Добавлена сводка по чанкам через `summarize_document_chunks()`.
+- Для стратегии `markdown_aware` Markdown-документы сначала делятся по структурным границам: заголовкам, пустым строкам и таблицам; крупные секции дополнительно режутся рекурсивно.
+- В notebook добавлен блок этапа `2.2`:
+  - импорт функций чанкинга;
+  - построение чанков для двух стратегий;
+  - вывод сводок и примеров metadata.
+
+**Результаты проверки чанкинга:**
+
+- Стратегия `recursive`:
+  - `chunks`: `251`;
+  - `source_documents`: `181`;
+  - `min_chunk_length`: `14`;
+  - `max_chunk_length`: `897`;
+  - `avg_chunk_length`: `554.06`;
+  - `formats`: `html=28`, `markdown=44`, `text=179`.
+- Стратегия `markdown_aware`:
+  - `chunks`: `337`;
+  - `source_documents`: `181`;
+  - `min_chunk_length`: `14`;
+  - `max_chunk_length`: `600`;
+  - `avg_chunk_length`: `427.37`;
+  - `formats`: `html=39`, `markdown=65`, `text=233`.
+- Для обеих стратегий подтверждено:
+  - чанки построены не пустыми;
+  - покрыты все `181` исходных документа;
+  - `chunk_id` уникальны внутри каждой стратегии;
+  - все чанки содержат metadata `doc_id`, `title`, `category`, `format`, `chunk_id`, `chunk_index`, `chunking_strategy`;
+  - `chunking_strategy` в metadata соответствует фактической стратегии;
+  - максимальная длина чанка не превышает настроенный `chunk_size` стратегии.
+
+**Проверки:**
+
+- `.\.venv\Scripts\python.exe -c "from langchain_text_splitters import RecursiveCharacterTextSplitter, MarkdownHeaderTextSplitter; print('splitters-ok')"` — выявлено, что пакет `langchain_text_splitters` не установлен в текущей `.venv`.
+- `.\.venv\Scripts\python.exe -c "from langchain.text_splitter import RecursiveCharacterTextSplitter, MarkdownHeaderTextSplitter; print('langchain.text_splitter-ok')"` — выявлено, что пакет `langchain` также не установлен в текущей `.venv`.
+- `.\.venv\Scripts\python.exe -m pip show langchain langchain-text-splitters` — подтвердил отсутствие этих пакетов в текущей `.venv`, несмотря на то что они указаны в `requirements.txt`.
+- `$files = Get-ChildItem -Path src -Filter '*.py' | ForEach-Object { $_.FullName }; .\.venv\Scripts\python.exe -m py_compile @files` — все Python-модули `src/*.py` компилируются.
+- Проверочный скрипт с `load_settings()`, `load_dataset()`, `clean_corpus()`, `build_langchain_documents()` и `build_document_chunks()` — успешно построил чанки для двух стратегий и подтвердил обязательные metadata, уникальность `chunk_id`, покрытие `181` документов и соблюдение `chunk_size`.
+- Проверка notebook JSON — notebook успешно читается, блок `2.2` найден, количество ячеек: `26`.
+- `git --no-pager diff --check` — пробельных ошибок нет.
+- `git --no-pager status --short` — изменены ожидаемые tracked-файлы после реализации пункта `2.2`.
+
+**Ошибки и предупреждения:**
+
+- Блокеров нет.
+- Текущая `.venv` содержит `langchain-core`, но не содержит `langchain` и `langchain-text-splitters`. Чтобы не расширять окружение в рамках пункта `2.2`, чанкинг реализован локально в `src/chunking.py` с совместимым интерфейсом и без изменения `requirements.txt`.
+- Первая попытка проверки импорта `langchain_text_splitters` завершилась `ModuleNotFoundError: No module named 'langchain_text_splitters'`.
+- Проверка старого импорта `langchain.text_splitter` завершилась `ModuleNotFoundError: No module named 'langchain'`.
+- Две первые попытки запустить временный проверочный скрипт из PowerShell завершились `ModuleNotFoundError: No module named 'src'`, потому что временный файл выполнялся вне корня проекта без `PYTHONPATH`. Проверка повторена с `$env:PYTHONPATH = (Get-Location).Path` и прошла успешно.
+- Первичная версия `markdown_aware` могла давать чанк длиной больше `ALT_CHUNK_SIZE` из-за overlap-префикса; объединение частей исправлено так, чтобы overlap не нарушал лимит стратегии. Повторная проверка подтвердила `max_chunk_length=600`.
+- Предупреждение `urllib3.contrib.socks.DependencyWarning` о необязательном PySocks по-прежнему появляется при импорте `trafilatura`; оно не блокирует пункт `2.2`.
+
+**Следующий шаг:**
+
+- Перейти к пункту `2.3. Построить embeddings`: реализовать wrapper для embedding-модели `intfloat/multilingual-e5-base`, проверить загрузку модели на локальной машине и подготовить embeddings для сравнения стратегий чанкинга.
