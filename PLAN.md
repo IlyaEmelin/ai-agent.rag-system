@@ -485,7 +485,7 @@ python -c "import langchain; import chromadb; import sentence_transformers; prin
 
 ## 4.1. Найти слабые запросы baseline
 
-**Статус:** `[ ]`
+**Статус:** `[x]`
 
 ### Задачи
 
@@ -509,7 +509,7 @@ python -c "import langchain; import chromadb; import sentence_transformers; prin
 
 ## 4.2. Реализовать BM25 retrieval
 
-**Статус:** `[ ]`
+**Статус:** `[x]`
 
 ### Задачи
 
@@ -524,7 +524,7 @@ python -c "import langchain; import chromadb; import sentence_transformers; prin
 
 ## 4.3. Реализовать RRF
 
-**Статус:** `[ ]`
+**Статус:** `[x]`
 
 ### Задачи
 
@@ -539,7 +539,7 @@ python -c "import langchain; import chromadb; import sentence_transformers; prin
 
 ## 4.4. Опционально подключить reranker
 
-**Статус:** `[ ]`
+**Статус:** `[x]`
 
 ### Задачи
 
@@ -555,7 +555,7 @@ python -c "import langchain; import chromadb; import sentence_transformers; prin
 
 ## 4.5. Сравнить baseline и улучшенный retrieval
 
-**Статус:** `[ ]`
+**Статус:** `[x]`
 
 ### Задачи
 
@@ -1849,4 +1849,56 @@ Gap-поведение: ...
 
 **Следующий шаг:**
 
-- Перейти к этапу `4.1. Найти слабые запросы baseline`: использовать `baseline_retrieval_results`, `find_zero_recall_queries()` и сохранённые top chunks для диагностики причин низкого `recall@5`, затем готовить BM25/RRF-улучшение в пунктах `4.2`–`4.3`.
+- Этап 4 выполнен; перейти к этапу `5.1. Реализовать клиент LLM`, затем собрать генерацию ответов поверх выбранного retrieval-пайплайна.
+
+## Журнал выполнения: этап 4
+
+**Статус:** завершён (`4.1`–`4.5`).
+
+**Что сделано:**
+
+- В `src/retrieval.py` реализован BM25 retrieval по тем же recursive-чанкам, что использует dense baseline:
+  - добавлен `BM25Index`;
+  - добавлена простая воспроизводимая токенизация `tokenize_for_bm25()` для русского и латинского текста через буквенно-цифровые токены в нижнем регистре;
+  - добавлены `build_bm25_index()`, `bm25_retrieve()` и `evaluate_bm25_retrieval()`;
+  - BM25 сохраняет исходные metadata чанков, `doc_id`, `chunk_id`, `title`, `category` и BM25-score.
+- В `src/retrieval.py` реализован hybrid retrieval Dense + BM25 + RRF:
+  - добавлена `reciprocal_rank_fusion()` с использованием `settings.retrieval.rrf_k` (`RRF_K` из `.env`);
+  - добавлены `hybrid_retrieve()` и `evaluate_hybrid_retrieval()`;
+  - итоговые hybrid-чанки получают `retrieval_method="hybrid_rrf"`, RRF-score, `source_scores` и `source_ranks` для dense/BM25;
+  - `format_retrieved_chunks()` расширен выводом `method`, `source_scores` и `source_ranks`.
+- В `src/metrics.py` добавлена диагностика слабых retrieval-запросов:
+  - `build_weak_query_diagnostics()` строит таблицу слабых запросов с `recall@1/3/5/10/20`, первым рангом релевантного документа, reciprocal rank, top doc_ids и диагнозом;
+  - `first_relevant_rank()` возвращает ранг первого релевантного документа;
+  - `classify_retrieval_issue()` разделяет случаи «релевантный документ найден, но слишком низко» и «не найден в просмотренной глубине».
+- В notebook добавлен раздел `## Этап 4. Диагностика и улучшение retrieval` с подпунктами:
+  - `4.1` — диагностика слабых dense baseline-запросов на базе `baseline_retrieval_results`, `gold`, `relevant_docs` и top chunks;
+  - `4.2` — построение BM25-индекса и BM25-only метрики;
+  - `4.3` — hybrid retrieval через RRF и пример вывода с source ranks/scores;
+  - `4.4` — решение по reranker: `RERANKER_ENABLED=false`, reranker оставлен следующим опциональным улучшением при недостаточном качестве BM25+RRF;
+  - `4.5` — таблицы сравнения `dense_baseline` → `bm25` → `hybrid_rrf`, разбивка по типам запросов и latency на небольшой выборке.
+- Reranker `BAAI/bge-reranker-v2-m3` не подключался как тяжёлая модель на этом шаге: в `.env.example` он уже вынесен в настройки, а текущая конфигурация `RERANKER_ENABLED=false` соответствует критерию этапа `4.4` с обоснованием ресурсы/latency/сложность.
+
+**Проверки:**
+
+- `$files = Get-ChildItem -Path src -Filter '*.py' | ForEach-Object { $_.FullName }; .\.venv\Scripts\python.exe -m py_compile @files` — все Python-модули `src/*.py` компилируются.
+- Notebook JSON validation через временный Python-скрипт — notebook читается как JSON, раздел `## Этап 4. Диагностика и улучшение retrieval` найден, количество ячеек: `56`.
+- Fast smoke этапа 4 на искусственной mini-collection без загрузки тяжёлой embedding-модели — успешно проверены:
+  - BM25 tokenization для русского/латинского текста и чисел;
+  - построение `BM25Index` по LangChain `Document` чанкам;
+  - `bm25_retrieve()` с сохранением metadata и BM25-score;
+  - `dense_retrieve()` на fake Chroma-like collection;
+  - `hybrid_retrieve()` через RRF с `source_scores` и `source_ranks`;
+  - `evaluate_bm25_retrieval()`, `evaluate_hybrid_retrieval()`, `compute_retrieval_metrics()` и `build_weak_query_diagnostics()`.
+- `git --no-pager diff --check` — whitespace-проверка diff проходит.
+- `git --no-pager status --short` после удаления временного smoke-файла показывает ожидаемые tracked-изменения: `PLAN.md`, notebook, `src/metrics.py`, `src/retrieval.py`.
+
+**Ошибки и предупреждения:**
+
+- Полный прогон notebook-этапа 4 с реальной моделью `intfloat/multilingual-e5-base` не запускался в этой проверке, чтобы не повторять длительное построение embeddings; функциональная логика BM25/RRF проверена быстрым smoke-тестом без тяжёлой модели.
+- Реальные значения метрик `bm25` и `hybrid_rrf` будут зафиксированы при следующем полном запуске notebook сверху вниз или при отдельном длительном smoke на уже построенной основной Chroma collection.
+- Reranker не включён намеренно: `RERANKER_ENABLED=false`; это снижает требования к памяти и задержку до проверки, достаточно ли BM25+RRF.
+
+**Следующий шаг:**
+
+- Перейти к этапу `5.1. Реализовать клиент LLM`: подготовить OpenAI-compatible клиент локального Qwen-сервера с `chat_template_kwargs.enable_thinking=false`, затем в `5.2`–`5.3` собрать prompt и полный RAG-пайплайн поверх выбранного retrieval-пайплайна.
